@@ -60,7 +60,7 @@ def diff(old, new):
         elif was != now:
             changes.append({
                 'model': mid, 'type': f'{was}→{now}', 'credits': cred,
-                'level': 'warn' if now == 'paid' else 'info',
+                'level': 'warn' if now == 'billable' else 'info',
                 'old_credits': (old or {}).get(mid, '')})
     for mid in (old or {}):
         if mid not in new and mid not in NEVER_ALLOW:
@@ -87,18 +87,18 @@ def main():
                'updatedAtHuman': datetime.datetime.now().isoformat(timespec='seconds')},
               open(SNAPSHOT, 'w'), ensure_ascii=False, indent=1)
 
-    free_now = [m for m, c in new.items() if classify(c) == 'free' and m not in NEVER_ALLOW]
+    included_now = [m for m, c in new.items() if classify(c) == 'included' and m not in NEVER_ALLOW]
     warn = [c for c in changes if c['level'] == 'warn']
 
     if '--json' in args:
-        print(json.dumps({'ok': True, 'free': sorted(free_now), 'changes': changes,
+        print(json.dumps({'ok': True, 'included': sorted(included_now), 'changes': changes,
                           'warn': bool(warn)}, ensure_ascii=False, indent=1))
     else:
         ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         if not old and not force:
-            print(f'[{ts}] 建立基线快照 · 可用模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
+            print(f'[{ts}] 建立基线快照 · 可用模型 {len(included_now)} 个: {", ".join(sorted(included_now))}')
         elif not changes:
-            print(f'[{ts}] ✅ 无变化 · 可用模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
+            print(f'[{ts}] ✅ 无变化 · 可用模型 {len(included_now)} 个: {", ".join(sorted(included_now))}')
         else:
             print(f'[{ts}] ⚠️ 检测到 {len(changes)} 处变化:')
             for c in changes:
