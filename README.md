@@ -2,6 +2,8 @@
 
 **Turn the official Tencent CodeBuddy CLI into an OpenAI-compatible API endpoint — no API key, no reverse engineering.**
 
+**English** | [中文](README.zh-CN.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
 
@@ -220,13 +222,7 @@ no context bloat, no reasoning-collapse loops.
 
 ## 中文说明
 
-把腾讯 CodeBuddy CLI 包成 OpenAI 兼容接口，**不需要 API key**，用官方 CLI 的登录态即可；
-只放行 `credits == x0.00` 的免费模型，三重保护防止误扣积分。
-
-- 安装：`npm i -g @tencent-ai/codebuddy-code` → `codebuddy` 登录 → `./install.sh`
-- 接入：把任意 OpenAI 客户端的 `base_url` 指向 `http://127.0.0.1:8790/v1`
-- 速度：比直连官方 API 每轮多约 2.4 秒（进程启动 + 多一跳），生成速度基本一致
-- 提醒：免费额度由官方决定，随时可能调整；本项目只是协议适配，不绕过计费
+完整中文文档见 **[README.zh-CN.md](README.zh-CN.md)**（独立成篇，与本文等长）。
 
 **完整免责声明见 [DISCLAIMER.md](DISCLAIMER.md)** —— 使用前请务必阅读。
 
