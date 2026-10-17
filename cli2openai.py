@@ -472,6 +472,46 @@ def _normalize_xml_tools(text):
     return _TOOL_XML.sub(conv, t)
 
 
+def _normalize_bare_tool_tags(text, tool_specs):
+    """第 9 形态:直接用工具名当标签,没有 <tool name=...> 包裹。
+
+        <execute_code>
+        from hermes_tools import terminal
+        ...
+        </execute_code>
+
+    工具名是本轮动态的,只能用 tool_specs 现算。
+    单参数工具(required 只有一个)→ 整段内容就是该参数值;
+    内部带 <param>...</param> 的 → 按标签解析。
+    """
+    if not text or not tool_specs:
+        return text
+    names = [sp['name'] for sp in tool_specs if sp.get('name')]
+    if not names:
+        return text
+    alt = '|'.join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    pat = re.compile(rf'<({alt})\s*>(.*?)</\1\s*>', re.S | re.I)
+    req_map = {sp['name']: list(sp.get('required') or []) for sp in tool_specs}
+
+    def conv(m):
+        name, body = m.group(1), m.group(2)
+        params = []
+        for pm in _XML_PARAM.finditer(body):
+            pn, pv = pm.group(1), pm.group(2)
+            if pn.lower() in _XML_INNER_SKIP:
+                continue
+            params.append(f'<parameter name="{pn}">{pv}</parameter>')
+        if params:
+            inner = ''.join(params)
+        else:
+            req = req_map.get(name) or []
+            pname = req[0] if len(req) == 1 else 'input'
+            inner = f'<parameter name="{pname}">{body}</parameter>'
+        return f'<invoke name="{name}">{inner}</invoke>'
+
+    return pat.sub(conv, text)
+
+
 def _parse_markup_calls(text, valid_names, forced):
     """标记语言兜底解析(DSML / toolinvoke)。返回 (calls, remaining) 或 (None, text)"""
     norm = _normalize_tags(text)
@@ -539,6 +579,8 @@ def parse_tool_calls(text, valid_names=None, forced=None, tool_specs=None):
     low = text.lower()
     if '<tool name' in low or '<tool calls' in low or '<tool call>' in low:
         text = _normalize_xml_tools(text)
+    # 第 9 形态:裸工具名标签(工具名本轮动态)
+    text = _normalize_bare_tool_tags(text, tool_specs)
     calls2, remaining2 = _parse_markup_calls(text, valid_names, forced)
     return calls2, _clean_marker_fragments(remaining2)
 
@@ -1012,6 +1054,13 @@ class Handler(BaseHTTPRequestHandler):
             arg_keys |= sp['props']
         _bare_re = (re.compile(r'[\n\r{,]\s*\{\s*"([A-Za-z_][\w]*)"\s*:') if arg_keys else None)
 
+        # 第 9 形态:裸工具名标签(<execute_code> 等)—— 工具名本轮动态,只能现算
+        _name_re = None
+        _names = [n for n in (valid_names or []) if n]
+        if _names:
+            _alt = '|'.join(re.escape(n) for n in sorted(_names, key=len, reverse=True))
+            _name_re = re.compile(rf'<({_alt})\s*>', re.I)
+
         def w(b):
             with lock:
                 self.wfile.write(b)
@@ -1065,6 +1114,16 @@ class Handler(BaseHTTPRequestHandler):
                     sent_len[0] = cut
                 json_mode[0] = True
                 return
+            # ★ 第 9 形态:裸工具名标签 —— 工具名本轮动态,命中即停发
+            if _name_re is not None:
+                mn = _name_re.search(acc)
+                if mn:
+                    cut = mn.start()
+                    if cut > sent_len[0]:
+                        chunked_send(acc[sent_len[0]:cut])
+                        sent_len[0] = cut
+                    json_mode[0] = True
+                    return
             # ★ 软信号:裸参数对象(模型忘写 name 包装时)—— 停发 + 看门狗保护
             if _bare_re is not None and not watchdog_done[0]:
                 mb = _bare_re.search(acc)
