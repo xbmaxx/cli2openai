@@ -244,6 +244,19 @@ python3 setup_hermes.py --dry-run # 只预览，不落盘
 | 任务中途停住 | 标记未被解析 → `tool_calls=0` | 裸参数推断（形态 #6） |
 | 写长文档时几分钟无输出 | 软信号扣留但没有看门狗 | 4 KB 后自动释放 |
 | 报 `empty content` | CLI 正常退出但零输出 | 带提示重试一次，仍空则报明确错误而不是沉默 |
+| **某一轮永久卡住、零输出** | `WB_MODE=structured`（`--json-schema`）：模型若只用纯文本回答、没有调用 `StructuredOutput` 工具，CLI 认为结构化结果未交付，不产出 `result` 也不退出 | 进程级看门狗 90 秒强杀；**保持默认 `WB_MODE=text`** |
+
+### 关于 `WB_MODE=structured`（实验性，默认关闭）
+
+设 `WB_MODE=structured` 会切到 CLI 原生的 `--json-schema` 通道：模型必须通过内置的
+`StructuredOutput` 工具交付结果，因此工具调用标记的形态漂移会彻底消失。
+
+**但它有一个硬失败模式。** 当模型用纯文本回答、没有调用 `StructuredOutput` 时，CLI 认为
+结构化结果未交付——它不产出 `result` 事件，也不退出。进程就此空转，既不报错也不超时。
+
+因此桥接层给每次 CLI 调用加了进程级看门狗（`CALL_TIMEOUT`，默认 90 秒）：到点强杀子进程
+并抛出明确错误。即便如此，**仍建议保持 text 模式为默认**——它有正常的退出路径，且经过
+的实际验证更多。
 
 ---
 

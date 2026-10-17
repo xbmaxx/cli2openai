@@ -253,7 +253,22 @@ no context bloat, no reasoning-collapse loops.
 | Raw JSON/DSML appears in the transcript | the model used a marker shape the filter didn't know | see the 7-shape table; add a rule |
 | A turn stalls mid-task | a marker parsed into nothing → `tool_calls=0` | bare-argument inference (shape #6) |
 | Minutes of silence while writing a long document | soft-signal hold with no watchdog | released automatically after 4 KB |
-| `empty content` | CLI exited 0 with no output | one hinted retry, then a concrete error instead of silence |
+| **A turn hangs forever with zero output** | `WB_MODE=structured` (`--json-schema`): if the model answers with plain text instead of calling the `StructuredOutput` tool, the CLI never emits `result` and never exits | process-level watchdog kills it at 90 s; **keep the default `WB_MODE=text`** |
+
+### About `WB_MODE=structured` (experimental, off by default)
+
+Setting `WB_MODE=structured` switches the bridge to the CLI's native `--json-schema`
+channel: the model must deliver results through the built-in `StructuredOutput` tool, so
+tool-call marker drift disappears entirely.
+
+**It also has a hard failure mode.** When the model replies in plain text without invoking
+`StructuredOutput`, the CLI treats the structured result as undelivered — it produces no
+`result` event and does not exit. The process sits idle indefinitely (no error, no timeout).
+
+The bridge therefore wraps every CLI call in a process-level watchdog (`CALL_TIMEOUT`,
+default 90 s) that kills the child and raises a concrete error. Even so, **text mode remains
+the recommended default** — it has an ordinary exit path and a much larger body of field
+testing behind it.
 
 ---
 

@@ -21,7 +21,7 @@ from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 
 CONFIG_DIR  = os.path.expanduser("~/.codebuddy")
 CACHE_FILE  = os.path.expanduser("~/.cli2openai/models.json")
-CALL_TIMEOUT = 180          # 单次调用超时(秒)
+CALL_TIMEOUT = 90           # 单次调用超时(秒);CLI 无输出时由 watchdog 兜底
 REFRESH_HOURS = 6           # 模型清单刷新间隔
 IS_WIN = (os.name == 'nt')
 
@@ -102,8 +102,11 @@ CLI = find_codebuddy()
 
 # 输出协议模式:
 #   text       (默认) 文本标记协议 —— 模型输出 JSON/DSML/XML 等标记,由解析器还原
-#   structured 结构化输出 —— 用 --json-schema + StructuredOutput 工具,结果落在
-#              structured_output 字段,不存在标记形态漂移
+#   structured 结构化输出(EXPERIMENTAL,有挂起风险,默认不开) —— 用 --json-schema +
+#              StructuredOutput 工具,结果落在 structured_output 字段,不存在标记形态漂移
+#              ⚠️ 已知缺陷:若模型只输出普通文本、没有调用 StructuredOutput 工具,
+#              CLI 会认为"结构化结果未交付",不产出 result 事件也不退出 —— 永久挂起。
+#              必须靠进程级 watchdog 兜底。生产环境建议用 text 模式。
 MODE = (os.environ.get('WB_MODE') or 'text').strip().lower()
 
 # ── 兜底白名单(启动且无法联网时使用)────────────────────────
@@ -764,6 +767,19 @@ def call_codebuddy_structured(model, prompt, system=None, tool_specs=None,
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding='utf-8', errors='replace',
                             env=env, cwd=cwd, bufsize=1)
+    # watchdog:CLI 若完全不输出(例如结构化结果未交付),for-line 会永久阻塞
+    _killed = {'by': None}
+
+    def _watchdog():
+        _killed['by'] = 'timeout'
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    _timer = threading.Timer(tmo, _watchdog)
+    _timer.daemon = True
+    _timer.start()
     try:
         deadline = time.time() + tmo
         for line in proc.stdout:
@@ -795,6 +811,10 @@ def call_codebuddy_structured(model, prompt, system=None, tool_specs=None,
                     structured = so
     finally:
         try:
+            _timer.cancel()
+        except Exception:
+            pass
+        try:
             proc.wait(timeout=10)
         except Exception:
             proc.kill()
@@ -805,8 +825,14 @@ def call_codebuddy_structured(model, prompt, system=None, tool_specs=None,
             pass
         if structured is None:
             print(f'[bridge] [结构化] 未拿到 structured_output '
-                  f'(rc={proc.returncode} thinking={think_total} events={ev_types}) '
+                  f'(rc={proc.returncode} killed={_killed["by"]} '
+                  f'thinking={think_total} events={ev_types}) '
                   f'{err[:160]}', file=sys.stderr, flush=True)
+
+    if _killed['by'] == 'timeout':
+        raise RuntimeError(
+            f'codebuddy 结构化模式超时 (>{tmo}s,CLI 无输出被 watchdog 终止)。'
+            '若模型未调用 StructuredOutput，CLI 会永久等待')
 
     if not isinstance(structured, dict):
         return '', [], None
@@ -869,6 +895,19 @@ def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding='utf-8', errors='replace',
                             env=env, cwd=cwd, bufsize=1)
+    # watchdog:CLI 完全不输出时 for-line 会永久阻塞,deadline 检查永不触发
+    _killed = {'by': None}
+
+    def _wd():
+        _killed['by'] = 'timeout'
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    _tmr = threading.Timer(tmo, _wd)
+    _tmr.daemon = True
+    _tmr.start()
     try:
         deadline = time.time() + tmo
         for line in proc.stdout:
@@ -913,6 +952,10 @@ def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None
                 if isinstance(r, str):
                     result = r
     finally:
+        try:
+            _tmr.cancel()
+        except Exception:
+            pass
         try:
             proc.wait(timeout=10)
         except Exception:
