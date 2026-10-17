@@ -27,6 +27,8 @@
         <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>__HOME__</string>
+        <key>WB_MODE</key>
+        <string>structured</string>
     </dict>
 </dict>
 </plist>

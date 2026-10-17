@@ -100,6 +100,12 @@ def find_codebuddy():
 
 CLI = find_codebuddy()
 
+# 输出协议模式:
+#   text       (默认) 文本标记协议 —— 模型输出 JSON/DSML/XML 等标记,由解析器还原
+#   structured 结构化输出 —— 用 --json-schema + StructuredOutput 工具,结果落在
+#              structured_output 字段,不存在标记形态漂移
+MODE = (os.environ.get('WB_MODE') or 'text').strip().lower()
+
 # ── 兜底白名单(启动且无法联网时使用)────────────────────────
 # 顺序即优先级:工具调用更稳定的排前面
 FALLBACK_MODELS = ["deepseek-v4.1-flash", "hy3"]
@@ -699,6 +705,134 @@ def _augment_path(env):
     return env
 
 
+def build_structured_schema(tool_specs):
+    """根据本轮工具集生成结构化输出 schema。
+
+    enum 限定工具名 → 模型无法编造、也无法用别的标记格式表达调用。
+    """
+    names = [sp['name'] for sp in (tool_specs or []) if sp.get('name')]
+    name_schema = {"type": "string", "enum": names} if names else {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {
+            "reply": {"type": "string",
+                      "description": "给用户的正文回复;本轮若要调用工具,可为空字符串"},
+            "tool_calls": {
+                "type": "array",
+                "description": "本轮要调用的工具;不需要调用时为空数组",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": name_schema,
+                        "arguments": {"type": "object", "additionalProperties": True},
+                    },
+                    "required": ["name", "arguments"],
+                },
+            },
+        },
+        "required": ["reply", "tool_calls"],
+    }
+
+
+def call_codebuddy_structured(model, prompt, system=None, tool_specs=None,
+                              on_think=None, timeout=None):
+    """结构化输出模式:--json-schema + 只放行 StructuredOutput 工具。
+
+    模型不再"发明"标记格式,而是通过 CLI 的 StructuredOutput 工具交付;
+    结果落在 result 事件的 structured_output 字段 → 不存在标记形态漂移。
+
+    返回 (reply_text, tool_calls, raw_structured)
+    """
+    schema = build_structured_schema(tool_specs)
+    args = ['-p', '--tools', 'StructuredOutput', '--model', model,
+            '--output-format', 'stream-json', '--include-partial-messages',
+            '--no-session-persistence',
+            '--json-schema', json.dumps(schema, ensure_ascii=False)]
+    if system:
+        args += ['--system-prompt', system]
+    args.append(prompt)
+
+    cli = _cli_path()
+    cmd = [cli] + args
+    env = dict(os.environ)
+    env['CODEBUDDY_CONFIG_DIR'] = CONFIG_DIR
+    env = _augment_path(env)
+    cwd = tempfile.gettempdir()
+    tmo = timeout or CALL_TIMEOUT
+
+    structured, think_total, ev_types = None, 0, {}
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding='utf-8', errors='replace',
+                            env=env, cwd=cwd, bufsize=1)
+    try:
+        deadline = time.time() + tmo
+        for line in proc.stdout:
+            if time.time() > deadline:
+                proc.kill()
+                raise RuntimeError(f'codebuddy 结构化模式超时 (>{tmo}s)')
+            line = (line or '').strip()
+            if not line.startswith('{'):
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            t = d.get('type')
+            ev_types[t] = ev_types.get(t, 0) + 1
+            if t == 'stream_event':
+                ev = d.get('event') or {}
+                if ev.get('type') == 'content_block_delta':
+                    dl = ev.get('delta') or {}
+                    if dl.get('type') == 'thinking_delta':
+                        th = dl.get('thinking') or ''
+                        if th:
+                            think_total += len(th)
+                            if on_think:
+                                on_think(th)
+            elif t == 'result':
+                so = d.get('structured_output')
+                if isinstance(so, dict):
+                    structured = so
+    finally:
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        err = ''
+        try:
+            err = (proc.stderr.read() or '').strip()[:300]
+        except Exception:
+            pass
+        if structured is None:
+            print(f'[bridge] [结构化] 未拿到 structured_output '
+                  f'(rc={proc.returncode} thinking={think_total} events={ev_types}) '
+                  f'{err[:160]}', file=sys.stderr, flush=True)
+
+    if not isinstance(structured, dict):
+        return '', [], None
+
+    reply = structured.get('reply') or ''
+    if not isinstance(reply, str):
+        reply = str(reply)
+
+    calls = []
+    raw_calls = structured.get('tool_calls') or []
+    if isinstance(raw_calls, list):
+        for rc in raw_calls:
+            if not isinstance(rc, dict):
+                continue
+            nm = rc.get('name')
+            if not isinstance(nm, str) or not nm.strip():
+                continue
+            ar = rc.get('arguments')
+            if not isinstance(ar, (dict, list)):
+                ar = {}
+            calls.append({'name': nm.strip(),
+                          'arguments': json.dumps(ar, ensure_ascii=False)})
+
+    return reply, calls, structured
+
+
 def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None,
                           on_think=None):
     """流式调用 CLI(真流式:边生成边回调)。
@@ -1027,9 +1161,88 @@ class Handler(BaseHTTPRequestHandler):
                 {'id': m, 'object': 'model', 'created': now, 'owned_by': 'cli2openai'}
                 for m in _allowed_models]})
         elif path in ('/health', '/v1/health'):
-            self._send(200, {'ok': True, 'models': _allowed_models, 'cli': CLI})
+            self._send(200, {'ok': True, 'models': _allowed_models, 'cli': CLI,
+                             'mode': MODE})
         else:
             self._send(404, {'error': {'message': f'not found: {path}'}})
+
+    def _stream_run_structured(self, model, prompt, system, valid_names, forced,
+                               cid, ts, tool_specs=None):
+        """结构化输出模式的流式实现。
+
+        取舍:正文不再逐字到达(结构化结果最后一次性给出),但工具调用是原生结构化的
+        —— 不存在标记形态漂移。思考仍逐块转发(reasoning_content),等待期间不黑屏。
+        """
+        if getattr(self, '_wlock', None) is None:
+            self._wlock = threading.Lock()
+        lock = self._wlock
+
+        def w(b):
+            with lock:
+                self.wfile.write(b)
+                self.wfile.flush()
+
+        def chunked_send(text, size=2048):
+            for i in range(0, len(text), size):
+                w(_frame(cid, ts, model, {'content': text[i:i + size]}))
+
+        think_parts, last_flush = [], [0.0]
+
+        def flush_think(force=False):
+            if not think_parts:
+                return
+            now = time.time()
+            if not force and now - last_flush[0] < 0.08:
+                return
+            txt = ''.join(think_parts)
+            think_parts.clear()
+            last_flush[0] = now
+            if txt:
+                w(_frame(cid, ts, model, {'reasoning_content': txt}))
+
+        def on_think(txt):
+            think_parts.append(txt)
+            flush_think()
+
+        w(_frame(cid, ts, model, {'role': 'assistant', 'content': ''}))
+
+        reply, raw_calls, structured = call_codebuddy_structured(
+            model, prompt, system, tool_specs=tool_specs, on_think=on_think)
+
+        if structured is None:
+            print('[bridge] [结构化] 空结果 → 带提示重试一次', file=sys.stderr, flush=True)
+            retry_prompt = (prompt + '\n\n[系统提示] 上一轮没有产出结构化结果。'
+                            '请调用 StructuredOutput,按 schema 填写 reply 与 tool_calls。')
+            reply, raw_calls, structured = call_codebuddy_structured(
+                model, retry_prompt, system, tool_specs=tool_specs, on_think=on_think)
+            if structured is None:
+                raise RuntimeError('codebuddy 结构化模式连续两次未返回 structured_output'
+                                   '(诊断见 bridge err 日志)')
+
+        flush_think(force=True)
+        calls = [_mk_call(c['name'], c['arguments'], i)
+                 for i, c in enumerate(raw_calls)]
+
+        if reply:
+            chunked_send(reply)
+
+        if calls:
+            w(_frame(cid, ts, model, {'tool_calls': [
+                {'index': i, 'id': c['id'], 'type': 'function',
+                 'function': {'name': c['function']['name'], 'arguments': ''}}
+                for i, c in enumerate(calls)]}))
+            for i, c in enumerate(calls):
+                a = c['function']['arguments']
+                for k in range(0, max(len(a), 1), 32):
+                    w(_frame(cid, ts, model, {'tool_calls': [{'index': i,
+                        'function': {'arguments': a[k:k + 32]}}]}))
+            w(_frame(cid, ts, model, {}, 'tool_calls'))
+        else:
+            w(_frame(cid, ts, model, {}, 'stop'))
+
+        w(b'data: [DONE]\n\n')
+        self.close_connection = True
+        return reply, calls, ''
 
     def _stream_run(self, model, prompt, system, valid_names, forced, cid, ts,
                     tool_specs=None):
@@ -1042,6 +1255,10 @@ class Handler(BaseHTTPRequestHandler):
             若最终没解析出工具调用则补发(内容不丢)
         """
         _SOFT_HOLD_MAX = 4000
+        # 结构化模式:走原生 --json-schema,不做标记解析
+        if MODE == 'structured':
+            return self._stream_run_structured(model, prompt, system, valid_names,
+                                               forced, cid, ts, tool_specs)
         buf, json_mode, soft_mode, sent_len = [], [False], [False], [0]
         cut_pos, watchdog_done = [0], [False]
         if getattr(self, '_wlock', None) is None:
