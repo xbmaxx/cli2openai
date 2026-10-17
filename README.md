@@ -256,7 +256,7 @@ no context bloat, no reasoning-collapse loops.
 
 ---
 
-## Credits
+## Acknowledgements
 
 Design decisions were informed by reading several open-source protocol bridges
 (muse-bridge, NanoProxy, acpbox, sample-acp-bridge). The retry, keep-alive,
