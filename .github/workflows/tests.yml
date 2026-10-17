@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  parser:
+    name: parser self-test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # ---------------------------------------------------------------------
+      # Pure-function tests only.
+      # No CLI, no network, no launchd, no credentials — safe in CI.
+      # (install.sh / verify.sh require a running bridge and a logged-in CLI,
+      #  so they are intentionally NOT run here.)
+      # ---------------------------------------------------------------------
+      - name: Parser self-test (12 cases)
+        run: python3 selftest_parser.py
+
+      - name: Bare-argument inference (7 cases)
+        run: python3 -c "import sys; sys.path.insert(0,'.'); import selftest_parser as st; p,t = st.test_bare_args_inference(); sys.exit(0 if p==t else 1)"
