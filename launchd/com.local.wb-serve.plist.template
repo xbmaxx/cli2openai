@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.wb-serve</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/codebuddy</string>
+        <string>--serve</string>
+        <string>--port</string>
+        <string>7890</string>
+        <string>--session-id</string>
+        <string>wb-serve-daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>WorkingDirectory</key>
+    <string>/tmp</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/wb-serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/wb-serve.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>CODEBUDDY_CONFIG_DIR</key>
+        <string>__HOME__/.codebuddy</string>
+    </dict>
+</dict>
+</plist>

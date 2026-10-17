@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.log
+*.zip
+.DS_Store
+.venv/
+venv/
+snapshot.json
+models.json
+*.egg-info/
