@@ -1,56 +1,74 @@
 # WorkBuddy Bridge
 
-**Turn the official Tencent CodeBuddy CLI into an OpenAI-compatible API endpoint — no API key, no reverse engineering.**
+**Expose the CodeBuddy CLI as an OpenAI-compatible API — so your existing OpenAI client can drive it.**
 
 **English** | [中文](README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![tests](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml)
 
 > ⚠️ **Read [DISCLAIMER.md](DISCLAIMER.md) first.** This project is an *interoperability
-> adapter*, not a crack. It uses only the officially distributed CLI and its documented
-> non-interactive mode. You are responsible for complying with Tencent's terms.
+> adapter*: it only drives the officially distributed CLI through its documented
+> non-interactive mode. You are responsible for complying with the applicable terms.
 
 ---
 
-## Why this exists
+## The problem
 
-The CodeBuddy CLI authenticates with **just a login** — no API key required — and some
-models are billed at **`x0.00` credits** (free). But the CLI speaks *its own* protocol,
-so you cannot use it from ordinary OpenAI-compatible clients (Hermes Agent, Open WebUI,
-Continue, LiteLLM, your own scripts…).
+The CodeBuddy CLI is a capable coding agent with its own tools, permissions and session
+handling. But it only speaks **its own protocol**.
 
-This bridge sits in between:
+Every mainstream client — Hermes Agent, Open WebUI, Continue, LiteLLM, LangChain,
+your own scripts — expects the OpenAI shape: `POST /v1/chat/completions`, SSE streaming,
+`tool_calls` in the response. The CLI speaks none of that, so the CLI simply cannot be
+plugged into those clients.
+
+That is the entire problem this project solves.
+
+## The solution
+
+A local bridge that sits between them:
 
 ```
-your client ──(OpenAI /v1/chat/completions)──▶ wb_bridge.py ──(official CLI, -p mode)──▶ model
-                                                  │
-                                                  └── parses the CLI's text/markup output
-                                                      back into native tool_calls
+your client ──(OpenAI /v1/chat/completions)──▶ wb_bridge.py ──(official CLI, -p mode)──▶ CodeBuddy
+     ▲                                              │
+     └───────── SSE + native tool_calls ◀───────────┘
+                (parsed back from the CLI's text output)
 ```
 
-## What it is (and isn't)
+Three responsibilities:
+
+1. **Accept** OpenAI-format requests (messages, tools, `tool_choice`, streaming).
+2. **Drive** the officially distributed CLI in its documented non-interactive mode.
+3. **Translate back** — the CLI emits text and markup, not `tool_calls`; the bridge parses
+   that into native `tool_calls` so multi-turn tool use closes the loop properly.
+
+Everything you already have keeps working: your client, your prompts, your tool loop,
+your session history.
+
+## What it is / isn't
 
 | | |
 |---|---|
-| ✅ **Is** a local protocol adapter (CLI text output → OpenAI `tool_calls`) | ❌ **Is not** a reverse-engineered client |
-| ✅ **Is** built on the official, MIT-licensed `@tencent-ai/codebuddy-code` CLI | ❌ **Is not** a credential extractor or account pool |
-| ✅ **Is** per-user: each user runs it against their own logged-in account | ❌ **Is not** a relay service, proxy, or resale product |
-| ✅ **Is** credit-safe: only models priced `x0.00` are allowed | ❌ **Is not** a way to avoid paying for a paid plan |
+| ✅ **Is** a local protocol adapter (OpenAI ⇄ CLI) | ❌ **Is not** a reverse-engineered client |
+| ✅ **Is** built on the officially distributed, MIT-licensed `@tencent-ai/codebuddy-code` | ❌ **Is not** a credential extractor or account pool |
+| ✅ **Is** per-user: each user drives their own installed CLI and own session | ❌ **Is not** a relay, proxy, or hosted service |
+| ✅ **Is** transparent: no bundled binaries, no patched upstream | ❌ **Is not** affiliated with or endorsed by the vendor |
 
-**It contains no Tencent code and bundles no binaries.**
+**This repository contains no vendor code and bundles no binaries.**
 
 ---
 
 ## Requirements
 
-- macOS or Windows (Linux should work; untested)
+- macOS or Windows (Linux expected to work; not thoroughly tested)
 - Python 3.8+
-- Node.js + the official CLI installed and logged in:
+- Node.js + the official CLI installed and signed in:
 
 ```bash
-npm install -g @tencent-ai/codebuddy-code --registry=https://registry.npmmirror.com
-codebuddy              # interactive mode → log in (browser or QR)
+npm install -g @tencent-ai/codebuddy-code
+codebuddy              # interactive mode → sign in
 ```
 
 ## Quick start
@@ -60,8 +78,8 @@ git clone https://github.com/xbmaxx/workbuddy-bridge.git
 cd workbuddy-bridge
 
 # macOS / Linux
-./install.sh                # installs a launchd (mac) or systemd-ish service on :8790
-./verify.sh                 # 18 self-checks
+./install.sh                # installs a launchd service on :8790
+./verify.sh                 # 18 local checks
 
 # Windows (PowerShell)
 .\install.ps1
@@ -73,16 +91,14 @@ Or run it in the foreground:
 python3 wb_bridge.py        # → http://127.0.0.1:8790/v1
 ```
 
-Health check:
-
 ```bash
 curl -s http://127.0.0.1:8790/health
-# {"ok": true, "free_models": ["deepseek-v4.1-flash", "hy3"], ...}
+# {"ok": true, "cli": "/path/to/codebuddy", "models": ["..."]}
 ```
 
 ## Use it from any OpenAI client
 
-Point your client at `http://127.0.0.1:8790/v1`, use any non-empty API key, and pick a
+Point your client at `http://127.0.0.1:8790/v1` with any non-empty API key, and pick a
 model from `/v1/models`.
 
 ```python
@@ -95,11 +111,31 @@ print(client.chat.completions.create(
 ).choices[0].message.content)
 ```
 
+Streaming and tool calls work the same way they do against a real OpenAI endpoint:
+
+```python
+stream = client.chat.completions.create(
+    model="deepseek-v4.1-flash",
+    messages=[{"role": "user", "content": "list the files in /tmp"}],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "terminal",
+            "description": "run a shell command",
+            "parameters": {"type": "object",
+                           "properties": {"command": {"type": "string"}},
+                           "required": ["command"]},
+        },
+    }],
+    stream=True,
+)
+```
+
 ### Hermes Agent (custom provider)
 
 ```yaml
 custom_providers:
-  - name: workbuddy-free
+  - name: codebuddy-cli
     base_url: http://127.0.0.1:8790/v1
     api_key: local
     models:
@@ -109,88 +145,88 @@ custom_providers:
         context_window: 200000
 ```
 
-`setup_hermes.py` does this for you (idempotent, with backup + rollback):
+`setup_hermes.py` performs the edit for you (idempotent, with backup and rollback):
 
 ```bash
 python3 setup_hermes.py           # inject provider into ~/.hermes/config.yaml
-python3 setup_hermes.py --dry-run # preview
+python3 setup_hermes.py --dry-run # preview only
 ```
+
+## Model discovery
+
+`/v1/models` is **synchronised from the CLI's own catalogue** — the bridge asks the CLI
+which models the current session can call, and exposes exactly that list.
+
+Two deliberate exclusions:
+
+- **Router entries** (`default-model`) are filtered out. It is not a concrete model — it is
+  an automatic router, so its behaviour is not reproducible and it has no fixed context
+  window. A bridge should expose deterministic targets only.
+- **Unknown names** are rejected with `404`, so a typo cannot silently fall through to
+  something unexpected.
+
+The catalogue is cached on disk; run `wb_watch.py` to refresh and diff it after a CLI
+upgrade.
 
 ---
 
-## Credit protection (the whole point)
+## How tool calls are bridged
 
-Three independent guards, so you never accidentally spend credits:
-
-1. **NEVER_ALLOW list** — `default-model` (the "Auto" router) is permanently banned,
-   because it can silently route to paid models while reporting empty credits.
-2. **Dynamic allow-list** — models are read from the CLI's own model catalogue and
-   accepted only if `_meta.credits == "x0.00"`.
-3. **Request-time guard** — any model outside the allow-list gets `HTTP 403` before the
-   CLI is ever invoked.
-
-`wb_watch.py` snapshots the catalogue so you notice when a free model stops being free:
-
-```bash
-python3 wb_watch.py --once     # diff against last snapshot
-```
-
----
-
-## How the tool-call bridge works
-
-The CLI does not emit native `tool_calls`, so the bridge defines its own contract and
-parses it back. Real models are messy — **seven distinct output shapes** have been
-observed in the wild:
+This is the non-trivial part. The CLI does not emit native `tool_calls`, so the bridge
+defines a JSON contract in the system prompt and parses it back. Real models are messy —
+**seven distinct output shapes** have been observed:
 
 | # | Shape | Handling |
 |---|---|---|
-| 1 | `{"name": "x", "arguments": {...}}` | primary path |
+| 1 | `{"name": "x", "arguments": {...}}` | primary contract |
 | 2 | `{"function": {"name": ..., "arguments": ...}}` | OpenAI-native form |
 | 3 | `<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="x">` | normalised, then matched |
-| 4 | DSML mixed shorthands | `_normalize_tags()` first |
-| 5 | *prose first*, then JSON | **full-text scan** (not just the prefix) |
-| 6 | **bare argument object** — `{"command": "ls"}` (missing `name`) | infer tool from required-arg coverage + ≥50% key match; refuse if ambiguous |
-| 7 | marker split across stream chunks (`{"name`) | hold back the tail until resolved |
+| 4 | DSML with mixed shorthands | `_normalize_tags()` first |
+| 5 | **prose first, then JSON** | **full-text scan** (a prefix check misses it) |
+| 6 | **bare argument object** — `{"command": "ls"}` (no `name`) | infer the tool from required-argument coverage + ≥50 % key match; refuse when ambiguous |
+| 7 | marker split across stream chunks (`{"name`) | hold the tail back until it resolves |
 
-Two important lessons baked into the code:
+Two lessons baked into the code:
 
-- **`--tools ""` does not stop the model from *thinking* it has built-in tools.** It will
-  happily emit `<｜｜DSML｜｜ invoke name="Write">` and waste a whole round. The system prompt
-  therefore states explicitly: *you have no built-in tools; only this JSON contract is valid.*
-- **Streaming removes the "post-hoc cleanup" safety net.** Non-streaming can strip JSON
-  fragments from the final text; streaming cannot un-send bytes. So filtering happens in
-  two tiers — hard markers (never re-sent) vs. soft signals (held, then re-sent if no tool
-  call was parsed) — plus a watchdog that releases held content after 4 KB.
+- **`--tools ""` does not stop the model from *believing* it has built-in tools.** It will
+  emit `<｜｜DSML｜｜ invoke name="Write">` and burn an entire round for nothing. The system
+  prompt therefore states explicitly: *you have no built-in tools; this JSON contract is
+  the only valid call format.*
+- **Streaming removes the "clean up afterwards" safety net.** A non-streaming path can strip
+  JSON fragments from the final text; a streaming path cannot un-send bytes. So filtering is
+  two-tier — hard markers (never re-sent) vs. soft signals (held, then re-sent if no tool
+  call was parsed) — plus a 4 KB watchdog that releases held content.
 
 ---
 
-## Performance (measured, not marketing)
+## Performance (measured)
 
-Same machine, same task, `deepseek-v4.1-flash`:
+Same machine, same task:
 
-| | DeepSeek official API | This bridge |
+| | Direct API call | Through this bridge |
 |---|---|---|
-| Small tool call — TTFT | 0.80 s | 3.20 s |
-| 400-char document — TTFT | 3.49 s | 5.78 s |
+| Small tool call — first token | 0.80 s | 3.20 s |
+| 400-char document — first token | 3.49 s | 5.78 s |
 | Generation speed | 385 chars/s | 320 chars/s |
 | **Per-round fixed cost** | — | **+2.4 s** |
 
-**Where the 2.4 s goes:** process spawn + CLI init + one extra network hop
-(`localhost → codebuddy.ai → model`). It is architectural and cannot be removed without
-upstream changes. Things that were tried and **made it worse**:
+**Where the 2.4 s goes:** process spawn + CLI initialisation + one extra network hop
+(`localhost → vendor endpoint → model`). It is architectural; it cannot be removed without
+upstream changes.
+
+**Approaches that were measured and rejected** (so you don't repeat them):
 
 | Attempt | Result |
 |---|---|
-| Persistent `--input-format stream-json` process | 1.5 s/round, but **unusable**: context accumulates, `/clear` falls back to on-disk "memory" files, and tool-disabling stops working |
-| `--serve` + `api/v1/llm/completions` | Endpoint exists, but upstream returns `400 request illegal` (needs GUI session context) |
-| Truncating long tool outputs | **3× slower** — the model sees "…10,000 chars omitted…" and burns thinking tokens trying to recover them |
-| `--effort minimal` / `low` | **2–3× slower** than the default (default emits no thinking tokens at all) |
+| Persistent `--input-format stream-json` process | 1.5 s/round, but **unusable**: context accumulates, `/clear` falls back to on-disk "memory" files, and tool-disabling silently stops working |
+| `--serve` + `api/v1/llm/completions` | Endpoint exists, but the upstream rejects it without a GUI session context (`400 request illegal`) |
+| Truncating long tool outputs | **3× slower** — the model sees "…10,000 chars omitted…" and spends thinking budget trying to recover them |
+| `--effort minimal` / `low` | **2–3× slower** than the default (the default emits no thinking tokens at all) |
 | Switching to `hy3` | 2× slower than `deepseek-v4.1-flash` |
 
-**The dominant variable is the model's own thinking budget, which is stochastic:**
-six identical runs took 6.5 / 9.4 / 14.5 / 15.6 / 16.9 / 18.6 s (thinking: 1.7 K–7.2 K chars).
-If you need predictable latency, use a paid API directly.
+**The dominant variable is the model's own thinking budget, which is stochastic:** six
+identical runs took 6.5 / 9.4 / 14.5 / 15.6 / 16.9 / 18.6 s (thinking 1.7 K–7.2 K chars).
+If you need predictable latency, call a model API directly.
 
 ---
 
@@ -198,12 +234,12 @@ If you need predictable latency, use a paid API directly.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/health` | status + free-model allow-list |
-| GET | `/v1/models` | OpenAI model list (allow-list only) |
-| POST | `/v1/chat/completions` | `stream` supported (SSE), tools supported |
+| GET | `/health` | health + resolved CLI path + model list |
+| GET | `/v1/models` | OpenAI model list (synced from the CLI catalogue) |
+| POST | `/v1/chat/completions` | `stream` (SSE) and tools supported |
 
 Streaming emits `reasoning_content` deltas for the model's thinking (80 ms throttled).
-`to_prompt()` never reads that field, so thinking is displayed but **never fed back** —
+`to_prompt()` never reads that field, so thinking is **displayed only and never fed back** —
 no context bloat, no reasoning-collapse loops.
 
 ---
@@ -212,25 +248,19 @@ no context bloat, no reasoning-collapse loops.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `找不到 codebuddy` / all requests fail | npm auto-update died between "create temp symlink" and "swap" | bridge self-heals the symlink on every call (`_heal_codebuddy_link`) |
-| Dialogue shows raw JSON/DSML | model emitted a marker shape the filter didn't know | see the 7-shape table; add a rule |
-| Replies stop mid-task | marker parsed as nothing → `tool_calls=0` | bare-arg inference (shape #6) |
-| Long document, no output for minutes | soft-signal hold with no watchdog | watchdog releases after 4 KB |
-| `empty content` errors | CLI exited 0 with no output | one hinted retry, then a real error instead of silence |
+| `codebuddy not found` / every request fails | npm auto-update died between "create temp symlink" and "swap" | the bridge self-heals the symlink before each call (`_heal_codebuddy_link`) |
+| Raw JSON/DSML appears in the transcript | the model used a marker shape the filter didn't know | see the 7-shape table; add a rule |
+| A turn stalls mid-task | a marker parsed into nothing → `tool_calls=0` | bare-argument inference (shape #6) |
+| Minutes of silence while writing a long document | soft-signal hold with no watchdog | released automatically after 4 KB |
+| `empty content` | CLI exited 0 with no output | one hinted retry, then a concrete error instead of silence |
 
 ---
 
-## 中文说明
-
-完整中文文档见 **[README.zh-CN.md](README.zh-CN.md)**（独立成篇，与本文等长）。
-
-**完整免责声明见 [DISCLAIMER.md](DISCLAIMER.md)** —— 使用前请务必阅读。
-
 ## Credits
 
-Design decisions informed by studying several open-source protocol bridges
-(muse-bridge, NanoProxy, acpbox, sample-acp-bridge) — the retry, keep-alive,
-hold-back-the-tail, and "soft signal re-send" patterns are borrowed ideas, reimplemented
+Design decisions were informed by reading several open-source protocol bridges
+(muse-bridge, NanoProxy, acpbox, sample-acp-bridge). The retry, keep-alive,
+hold-back-the-tail and "soft signal re-send" patterns are borrowed ideas, reimplemented
 here for a CLI that emits text instead of native tool calls.
 
 ## License

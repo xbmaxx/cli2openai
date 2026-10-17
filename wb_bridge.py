@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-WorkBuddy Bridge —— 把 codebuddy CLI 包成 OpenAI 兼容 API
-让 Hermes 的 custom_provider 直接选到免费模型。
+WorkBuddy Bridge —— 把 codebuddy CLI 暴露成 OpenAI 兼容 API
 
-安全设计:
-  1. 模型白名单硬守卫 —— 非 x0.00 的模型一律拒绝,不消耗积分
-  2. default-model (Auto) 被排除 —— 它可能路由到收费模型
-  3. 白名单可热刷新 —— credits 变化时自动更新
+解决的问题:
+  codebuddy CLI 只说自己的协议，普通 OpenAI 客户端（Hermes / Open WebUI / Continue /
+  LiteLLM / 自研脚本）无法直接驱动它。本桥接层负责双向协议转换。
+
+设计要点:
+  1. 模型范围守卫 —— 只暴露当前会话可直接调用的模型，范围外的请求返回 403
+  2. 路由型条目（default-model）被排除 —— 它不是确定的模型，行为不可复现
+  3. 清单可热刷新 —— CLI 目录变化时自动更新
 
 用法:
   python3 wb_bridge.py                 # 启动服务 (默认 :8790)
@@ -99,14 +102,14 @@ CLI = find_codebuddy()
 
 # ── 兜底白名单(启动且无法联网时使用)────────────────────────
 # 顺序即优先级:工具调用更稳定的排前面
-FALLBACK_FREE = ["deepseek-v4.1-flash", "hy3"]
+FALLBACK_MODELS = ["deepseek-v4.1-flash", "hy3"]
 # 永远排除:default-model 是 Auto,可能路由到收费模型
 NEVER_ALLOW = {"default-model"}
 # 排序偏好(未列出的排最后)
 PREFERRED_ORDER = ["deepseek-v4.1-flash", "hy3"]
 
 _lock = threading.Lock()
-_free_models = list(FALLBACK_FREE)
+_allowed_models = list(FALLBACK_MODELS)
 
 
 # ── 模型清单:通过 ACP 从 CLI 自身读取 credits ─────────────────
@@ -171,8 +174,8 @@ def _read_password():
     return None
 
 
-def compute_free(models):
-    """从模型清单里筛出免费模型(credits 为 x0.00 / 0 / 空且非 Auto)"""
+def select_included_models(models):
+    """从模型清单里筛出当前会话可直接调用的模型（不触发额外计费：credits 为 0 / 空，且非路由型）"""
     free = []
     for m in models:
         mid = m.get('modelId') or m.get('id')
@@ -183,35 +186,36 @@ def compute_free(models):
             free.append(mid)
     # 按偏好排序:工具调用稳定的排前面(verify 也取第一个)
     free.sort(key=lambda m: PREFERRED_ORDER.index(m) if m in PREFERRED_ORDER else 999)
-    return free or list(FALLBACK_FREE)
+    return free or list(FALLBACK_MODELS)
 
 
 def refresh_models(verbose=True):
-    """刷新白名单并落盘。返回 (free_list, changed)"""
-    global _free_models
+    """刷新可用模型清单并落盘。返回 (free_list, changed)"""
+    global _allowed_models
     models = fetch_models()
     if not models:
         if verbose:
-            print('[bridge] 未拉到模型清单,沿用缓存/兜底')
-        return _free_models, False
-    free = compute_free(models)
+            print('[bridge] 未拉到模型清单，沿用缓存/兜底')
+        return _allowed_models, False
+    free = select_included_models(models)
     with _lock:
-        changed = (free != _free_models)
-        _free_models = free
+        changed = (free != _allowed_models)
+        _allowed_models = free
     os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-    json.dump({'free': free, 'all': models, 'updatedAt': int(time.time())},
+    json.dump({'allowed': free, 'all': models, 'updatedAt': int(time.time())},
               open(CACHE_FILE, 'w'), ensure_ascii=False, indent=1)
     if changed and verbose:
-        print(f'[bridge] ⚠️ 免费模型清单变化 → {free}')
+        print(f'[bridge] ⚠️ 可用模型清单变化 → {free}')
     return free, changed
 
 
 def load_cache():
-    global _free_models
+    global _allowed_models
     try:
         d = json.load(open(CACHE_FILE))
-        if d.get('free'):
-            _free_models = [m for m in d['free'] if m not in NEVER_ALLOW]
+        allowed = d.get('allowed') or d.get('free')   # 兼容旧缓存字段
+        if allowed:
+            _allowed_models = [m for m in allowed if m not in NEVER_ALLOW]
             return True
     except Exception:
         pass
@@ -942,9 +946,9 @@ class Handler(BaseHTTPRequestHandler):
             now = int(time.time())
             self._send(200, {'object': 'list', 'data': [
                 {'id': m, 'object': 'model', 'created': now, 'owned_by': 'workbuddy-free'}
-                for m in _free_models]})
+                for m in _allowed_models]})
         elif path in ('/health', '/v1/health'):
-            self._send(200, {'ok': True, 'free_models': _free_models, 'cli': CLI})
+            self._send(200, {'ok': True, 'models': _allowed_models, 'cli': CLI})
         else:
             self._send(404, {'error': {'message': f'not found: {path}'}})
 
@@ -1094,14 +1098,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {'error': {'message': f'bad json: {e}'}})
             return
 
-        model = (req.get('model') or _free_models[0]).strip()
+        model = (req.get('model') or _allowed_models[0]).strip()
         t_start = time.time()
         self.log_req(f'→ {model} | msgs={len(req.get("messages") or [])} '
                      f'tools={len(req.get("tools") or [])} stream={bool(req.get("stream"))}')
         # ★ 白名单硬守卫
-        if model not in _free_models:
+        if model not in _allowed_models:
             self._send(403, {'error': {
-                'message': f'model "{model}" 不在免费白名单内。允许: {_free_models}',
+                'message': f'model "{model}" 不在可用模型范围内。当前可用: {_allowed_models}',
                 'type': 'model_not_allowed', 'code': 'model_not_allowed'}})
             return
 
@@ -1213,7 +1217,7 @@ def main():
     threading.Thread(target=loop, daemon=True).start()
 
     print(f'[bridge] WorkBuddy Bridge 启动 → http://127.0.0.1:{port}/v1', flush=True)
-    print(f'[bridge] 免费白名单: {_free_models}', flush=True)
+    print(f'[bridge] 可用模型范围: {_allowed_models}', flush=True)
     print(f'[bridge] CLI: {CLI}', flush=True)
     print(f'[bridge] 并发: ThreadingHTTPServer(多请求并行)', flush=True)
     # ThreadingHTTPServer:避免单线程串行导致 Hermes 并发请求排队超时

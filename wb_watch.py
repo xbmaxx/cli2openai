@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-WorkBuddy 免费模型监控 —— 检测免费状态变化并告警
+WorkBuddy 模型目录监控 —— 检测可用模型清单变化并告警
 
 背景:
-  模型的 credits 倍率由腾讯控制,随时可能从 x0.00 变成收费。
-  本脚本定时快照,发现变化就告警,避免"不知情被扣积分"。
+  CLI 的模型目录由上游控制，条目随时可能增减或改变计费属性。
+  本脚本定时快照，发现变化就告警，便于及时调整客户端配置。
 
 用法:
   python3 wb_watch.py              # 检查一次,有变化则输出告警(退出码 1)
@@ -16,7 +16,7 @@ WorkBuddy 免费模型监控 —— 检测免费状态变化并告警
 import json, os, sys, time, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wb_bridge import fetch_models, compute_free, NEVER_ALLOW, CACHE_FILE
+from wb_bridge import fetch_models, select_included_models, NEVER_ALLOW, CACHE_FILE
 
 SNAPSHOT = os.path.expanduser('~/.workbuddy-bridge/snapshot.json')
 
@@ -43,9 +43,9 @@ def load_snapshot():
 
 
 def classify(credits):
-    """x0.00 / 空 → free;其它 → paid"""
+    """credits 为 0 / 空 → included（不额外计费）;其它 → billable"""
     c = (credits or '').strip()
-    return 'free' if (c in ('x0.00', 'x0', '0.00', '') or c.startswith('x0.00')) else 'paid'
+    return 'included' if (c in ('x0.00', 'x0', '0.00', '') or c.startswith('x0.00')) else 'billable'
 
 
 def diff(old, new):
@@ -96,16 +96,16 @@ def main():
     else:
         ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         if not old and not force:
-            print(f'[{ts}] 建立基线快照 · 免费模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
+            print(f'[{ts}] 建立基线快照 · 可用模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
         elif not changes:
-            print(f'[{ts}] ✅ 无变化 · 免费模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
+            print(f'[{ts}] ✅ 无变化 · 可用模型 {len(free_now)} 个: {", ".join(sorted(free_now))}')
         else:
             print(f'[{ts}] ⚠️ 检测到 {len(changes)} 处变化:')
             for c in changes:
                 flag = '🔴' if c['level'] == 'warn' else 'ℹ️'
                 print(f"   {flag} {c['model']:28} {c['type']:14} credits={c['credits']}")
             if warn:
-                print('\n   ⚠️ 有模型从免费变为收费 —— 请检查 Hermes 白名单是否需调整')
+                print('\n   ⚠️ 模型条目属性发生变化 —— 请检查客户端配置是否需调整')
 
     return 1 if warn else 0
 

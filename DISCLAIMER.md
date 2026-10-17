@@ -30,13 +30,18 @@ distributed** `codebuddy` CLI in its **documented non-interactive mode**:
 codebuddy -p --tools "" --output-format stream-json "your prompt"
 ```
 
+Its sole purpose is to bridge a protocol gap: the CLI speaks its own protocol, OpenAI-style
+clients expect a different one. Nothing more.
+
 The CLI is installed by the user from the public npm registry
 (`@tencent-ai/codebuddy-code`), which is distributed under an **MIT-style licence**.
 This repository contains **no Tencent code** and **no bundled binaries** — it only
 contains our own Python adapter.
 
-本项目是一个**协议适配器**：把官方 CLI 的文本输出转换成 OpenAI 格式，
-让任意支持 OpenAI 协议的客户端都能使用该 CLI 已登录的账号。仓库内**不含任何腾讯代码或二进制**。
+本项目是一个**协议适配器**：把官方 CLI 的输出转换成 OpenAI 格式，让支持 OpenAI 协议的客户端
+能够驱动该 CLI。它只解决协议不通的问题。
+
+仓库内**不含任何腾讯代码或二进制**，只包含本项目自己的 Python 代码。
 
 ---
 
@@ -53,13 +58,15 @@ We deliberately avoid every technique that would cross from "interoperability" i
 | Forging plugin signatures or bypassing authentication | ❌ Not used |
 | Sharing, pooling, or reselling accounts | ❌ Not supported by design |
 | Modifying or redistributing Tencent binaries | ❌ Not done |
+| Granting entitlements the user's account does not already have | ❌ Not possible |
 
 Every user runs the bridge **against their own locally installed CLI and their own
-logged-in account**. There is no central relay, no shared credential pool, and no
-traffic proxying service operated by this project.
+logged-in account**. There is no central relay, no shared credential pool, and no traffic
+proxying service operated by this project.
 
-本项目**不做**逆向、不提取或存储凭据、不伪造指纹/设备 ID、不绕过认证、不共享账号、不修改或再分发官方二进制。
-每个使用者都只针对**自己本机安装的 CLI 和自己的账号**运行。
+本项目**不做**逆向、不提取或存储凭据、不伪造指纹/设备 ID、不绕过认证、不共享账号、不修改或
+再分发官方二进制、也不会产生用户账号本身不具备的权限。每个使用者都只针对**自己本机安装的
+CLI 和自己的账号**运行。
 
 ---
 
@@ -67,19 +74,19 @@ traffic proxying service operated by this project.
 
 By using this software you acknowledge and agree that:
 
-1. **You are solely responsible** for how you use it, and for complying with
-   Tencent's Terms of Service, Acceptable Use Policy, and any quota or billing rules
-   that apply to your account.
-2. **Free-tier model availability is a commercial decision made by Tencent**, not by
-   this project. Free models (e.g. models billed at `x0.00` credits) can be changed,
-   limited, or withdrawn **at any time without notice**. This project does not, and
-   cannot, guarantee that any model stays free.
-3. **This is not a way to avoid paying for a paid plan.** If your use case requires a
-   paid tier, buy the paid tier. This project exists for interoperability and for
-   experimenting with CLI-backed local agents — not for circumventing billing.
+1. **You are solely responsible** for how you use it, and for complying with the vendor's
+   terms of service, acceptable-use policy, and any usage rules that apply to your account.
+2. **Model availability and account entitlements are decided by the vendor**, not by this
+   project. The set of models your session can call may change, be limited, or be withdrawn
+   at any time without notice. This project does not, and cannot, guarantee the availability
+   of any model.
+3. **This project is not a billing workaround.** It exists purely for protocol
+   interoperability — so an OpenAI-compatible client can drive a CLI that speaks a
+   different protocol. If your use case requires an entitlement, obtain it through the
+   vendor's normal channels.
 4. You will not use this software to build a paid relay, resale service, or
    credential-sharing service.
-5. You will stop using it if Tencent asks you to.
+5. You will stop using it if the vendor asks you to.
 
 ---
 
@@ -92,8 +99,8 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTIO
 CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-This includes — without limitation — **account suspension, quota loss, data loss,
-service interruption, or any action taken by Tencent against your account**.
+This includes — without limitation — **account suspension, entitlement loss, data loss,
+service interruption, or any action taken by the vendor against your account**.
 You accept that risk entirely.
 
 ---
@@ -105,7 +112,7 @@ violates your terms, **open an issue or contact the maintainer directly**. We wi
 respond promptly and, where a legitimate concern is raised, **remove or modify the
 offending material without argument**.
 
-If Tencent (or any authorised party) requests removal, this repository will be taken
+If the vendor (or any authorised party) requests removal, this repository will be taken
 down or made private immediately.
 
 ---
