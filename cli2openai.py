@@ -386,12 +386,15 @@ _MARKER_RE = re.compile(
     r'\{"(?:name|tool_calls)"\s*:'      # JSON 契约: {"name": / {"tool_calls":
     r'|<｜｜DSML'                        # 标准 DSML 标记
     r'|<toolinvoke\b'                   # 简写标记
-    r'|<tool_calls?[:>]',               # 哈希变体 <tool_calls:xxx>
+    r'|<tool_calls?[:>]'                # 哈希变体 <tool_calls:xxx>
+    r'|<tool\s+calls?\b'                # XML 风格: <tool calls> / <tool call>
+    r'|<tool\s+name\s*=',               # XML 风格: <tool name="X">
     re.I)
 
 # 标记的完整形态(用于"尾部疑似前缀"检测 —— 避免把 {"name 这种半个标记发出去)
 _FULL_MARKERS = ('{"name":', '{"tool_calls":', '<｜｜DSML', '<toolinvoke',
-                 '<tool_calls:', '<tool_call>', '<tool_calls>')
+                 '<tool_calls:', '<tool_call>', '<tool_calls>',
+                 '<tool calls>', '<tool name=')
 
 
 def _partial_marker_tail(s):
@@ -436,6 +439,37 @@ def _normalize_tags(text):
     t = _DSML_OPEN.sub('<', text)
     t = _DSML_CLOSE.sub('</', t)
     return t
+
+
+# ── XML 风格工具调用(实测第 8 种形态)────────────────────────
+#   <tool calls>
+#   <tool name="execute_code">
+#   <code>import re ...</code>
+#   </tool>
+# 归一成 DSML 形态,复用已有解析器。
+_TOOL_CALLS_XML = re.compile(r'<tool\s+calls?\s*>', re.I)
+_TOOL_XML       = re.compile(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)</tool\s*>',
+                             re.S | re.I)
+_XML_PARAM      = re.compile(r'<([a-zA-Z_][\w-]*)\s*>(.*?)</\1\s*>', re.S)
+_XML_INNER_SKIP = {'tool', 'parameter', 'invoke', 'calls', 'toolinvoke'}
+
+
+def _normalize_xml_tools(text):
+    """把 XML 风格调用块归一成 DSML 形态(只处理 <tool name=...> 包裹的块)。"""
+    t = _TOOL_CALLS_XML.sub('<calls>', text)
+
+    def conv(m):
+        name, body = m.group(1), m.group(2)
+        params = []
+        for pm in _XML_PARAM.finditer(body):
+            pname, pval = pm.group(1), pm.group(2)
+            if pname.lower() in _XML_INNER_SKIP:
+                continue
+            params.append(f'<parameter name="{pname}">{pval}</parameter>')
+        inner = ''.join(params) if params else body
+        return f'<invoke name="{name}">{inner}</invoke>'
+
+    return _TOOL_XML.sub(conv, t)
 
 
 def _parse_markup_calls(text, valid_names, forced):
@@ -501,7 +535,10 @@ def parse_tool_calls(text, valid_names=None, forced=None, tool_specs=None):
         keep.append(text[last:])
         return calls, _clean_marker_fragments(''.join(keep).strip())
 
-    # ── 兜底:标记语言 ──
+    # ── 兜底:标记语言(先归一化 XML 风格 <tool name="X">,再走 DSML 解析)──
+    low = text.lower()
+    if '<tool name' in low or '<tool calls' in low or '<tool call>' in low:
+        text = _normalize_xml_tools(text)
     calls2, remaining2 = _parse_markup_calls(text, valid_names, forced)
     return calls2, _clean_marker_fragments(remaining2)
 
@@ -987,6 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── 思考流:作为 reasoning_content 转发(Hermes 单独渲染;to_prompt 不读它,不入历史) ──
         think_parts, last_think_flush = [], [0.0]
+        think_total = [0]                      # 累计思考字数(空响应诊断用)
 
         def flush_think(force=False):
             if not think_parts:
@@ -1001,6 +1039,7 @@ class Handler(BaseHTTPRequestHandler):
                 w(_frame(cid, ts, model, {'reasoning_content': txt}))
 
         def on_think(txt):
+            think_total[0] += len(txt)
             think_parts.append(txt)
             flush_think()
 
@@ -1058,8 +1097,15 @@ class Handler(BaseHTTPRequestHandler):
             full, result = call_codebuddy_stream(model, retry_prompt, system, on_text,
                                                  on_think=on_think)
             if not full and not result:
-                print('[bridge] 空响应重试仍空 → 报错', file=sys.stderr, flush=True)
-                raise RuntimeError('codebuddy 连续两次返回空内容（诊断见 cli2openai.err.log）')
+                print(f'[bridge] 空响应重试仍空 → 报错 '
+                      f'(prompt={len(prompt):,} system={len(system or ""):,} '
+                      f'thinking={think_total[0]:,})', file=sys.stderr, flush=True)
+                raise RuntimeError(
+                    f'模型本轮只产生思考、未产生正文'
+                    f'（思考 {think_total[0]:,} 字符；'
+                    f'prompt {len(prompt):,} + system {len(system or ""):,} 字符）。'
+                    f'上下文过长时会出现这种情况 —— 建议压缩会话历史、'
+                    f'或拆成更小的任务后重试。')
         flush_think(force=True)          # 把最后一段思考发完
         calls, remaining = parse_tool_calls(result, valid_names, forced, tool_specs)
 

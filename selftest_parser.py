@@ -82,6 +82,8 @@ def test_bare_args_inference():
         ('未知键无法推断', '{"foo":"bar"}', None),
         ('文本+裸参数混合', '先说一句。\n\n{"command":"pwd"}', 'terminal'),
         ('标准形不受影响', '{"name":"terminal","arguments":{"command":"ls"}}', 'terminal'),
+        ('XML 形态 tool name=X', '<tool calls>\n<tool name="terminal">\n<command>ls -la</command>\n</tool>', 'terminal'),
+        ('XML 形态多参数', '<tool calls>\n<tool name="write_file">\n<path>/tmp/a</path>\n<content>hi</content>\n</tool>', 'write_file'),
         ('多工具包装', '{"tool_calls":[{"name":"terminal","arguments":{"command":"ls"}}]}', 'terminal'),
     ]
     passed = 0
