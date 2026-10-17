@@ -9,7 +9,8 @@
 [![tests](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml)
 
 > ⚠️ **使用前请先读 [免责声明](DISCLAIMER.md)。** 本项目是**互操作性适配器**：
-> 只通过官方分发的 CLI 及其文档化的非交互模式驱动它。你需要自行遵守相关条款。
+> 只通过官方分发的 CLI 及其文档化的非交互模式驱动它。**本项目与上游厂商无任何关联、
+> 未获其授权或背书。** 你需要自行遵守相关条款。
 
 ---
 

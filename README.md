@@ -10,7 +10,8 @@
 
 > ⚠️ **Read [DISCLAIMER.md](DISCLAIMER.md) first.** This project is an *interoperability
 > adapter*: it only drives the officially distributed CLI through its documented
-> non-interactive mode. You are responsible for complying with the applicable terms.
+> non-interactive mode. **It is not affiliated with, endorsed by, or sponsored by the
+> upstream vendor.** You are responsible for complying with the applicable terms.
 
 ---
 
