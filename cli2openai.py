@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WorkBuddy Bridge —— 把 codebuddy CLI 暴露成 OpenAI 兼容 API
+cli2openai —— 把 codebuddy CLI 暴露成 OpenAI 兼容 API
 
 解决的问题:
   codebuddy CLI 只说自己的协议，普通 OpenAI 客户端（Hermes / Open WebUI / Continue /
@@ -12,15 +12,15 @@ WorkBuddy Bridge —— 把 codebuddy CLI 暴露成 OpenAI 兼容 API
   3. 清单可热刷新 —— CLI 目录变化时自动更新
 
 用法:
-  python3 wb_bridge.py                 # 启动服务 (默认 :8790)
-  python3 wb_bridge.py --refresh       # 只刷新模型清单
-  python3 wb_bridge.py --port 8790
+  python3 cli2openai.py                 # 启动服务 (默认 :8790)
+  python3 cli2openai.py --refresh       # 只刷新模型清单
+  python3 cli2openai.py --port 8790
 """
 import json, os, subprocess, sys, re, threading, time, shutil, tempfile
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 
 CONFIG_DIR  = os.path.expanduser("~/.codebuddy")
-CACHE_FILE  = os.path.expanduser("~/.workbuddy-bridge/models.json")
+CACHE_FILE  = os.path.expanduser("~/.cli2openai/models.json")
 CALL_TIMEOUT = 180          # 单次调用超时(秒)
 REFRESH_HOURS = 6           # 模型清单刷新间隔
 IS_WIN = (os.name == 'nt')
@@ -945,7 +945,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/v1/models':
             now = int(time.time())
             self._send(200, {'object': 'list', 'data': [
-                {'id': m, 'object': 'model', 'created': now, 'owned_by': 'workbuddy-free'}
+                {'id': m, 'object': 'model', 'created': now, 'owned_by': 'cli2openai'}
                 for m in _allowed_models]})
         elif path in ('/health', '/v1/health'):
             self._send(200, {'ok': True, 'models': _allowed_models, 'cli': CLI})
@@ -1059,7 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
                                                  on_think=on_think)
             if not full and not result:
                 print('[bridge] 空响应重试仍空 → 报错', file=sys.stderr, flush=True)
-                raise RuntimeError('codebuddy 连续两次返回空内容（诊断见 wb-bridge.err.log）')
+                raise RuntimeError('codebuddy 连续两次返回空内容（诊断见 cli2openai.err.log）')
         flush_think(force=True)          # 把最后一段思考发完
         calls, remaining = parse_tool_calls(result, valid_names, forced, tool_specs)
 
@@ -1216,7 +1216,7 @@ def main():
             refresh_models()
     threading.Thread(target=loop, daemon=True).start()
 
-    print(f'[bridge] WorkBuddy Bridge 启动 → http://127.0.0.1:{port}/v1', flush=True)
+    print(f'[bridge] cli2openai 启动 → http://127.0.0.1:{port}/v1', flush=True)
     print(f'[bridge] 可用模型范围: {_allowed_models}', flush=True)
     print(f'[bridge] CLI: {CLI}', flush=True)
     print(f'[bridge] 并发: ThreadingHTTPServer(多请求并行)', flush=True)

@@ -1,4 +1,4 @@
-# WorkBuddy Bridge
+# cli2openai
 
 **Expose the CodeBuddy CLI as an OpenAI-compatible API — so your existing OpenAI client can drive it.**
 
@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
-[![tests](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml)
+[![tests](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml)
 
 > ⚠️ **Read [DISCLAIMER.md](DISCLAIMER.md) first.** This project is an *interoperability
 > adapter*: it only drives the officially distributed CLI through its documented
@@ -31,7 +31,7 @@ That is the entire problem this project solves.
 A local bridge that sits between them:
 
 ```
-your client ──(OpenAI /v1/chat/completions)──▶ wb_bridge.py ──(official CLI, -p mode)──▶ CodeBuddy
+your client ──(OpenAI /v1/chat/completions)──▶ cli2openai.py ──(official CLI, -p mode)──▶ CodeBuddy
      ▲                                              │
      └───────── SSE + native tool_calls ◀───────────┘
                 (parsed back from the CLI's text output)
@@ -74,8 +74,8 @@ codebuddy              # interactive mode → sign in
 ## Quick start
 
 ```bash
-git clone https://github.com/xbmaxx/workbuddy-bridge.git
-cd workbuddy-bridge
+git clone https://github.com/xbmaxx/cli2openai.git
+cd cli2openai
 
 # macOS / Linux
 ./install.sh                # installs a launchd service on :8790
@@ -88,7 +88,7 @@ cd workbuddy-bridge
 Or run it in the foreground:
 
 ```bash
-python3 wb_bridge.py        # → http://127.0.0.1:8790/v1
+python3 cli2openai.py        # → http://127.0.0.1:8790/v1
 ```
 
 ```bash
@@ -165,7 +165,7 @@ Two deliberate exclusions:
 - **Unknown names** are rejected with `404`, so a typo cannot silently fall through to
   something unexpected.
 
-The catalogue is cached on disk; run `wb_watch.py` to refresh and diff it after a CLI
+The catalogue is cached on disk; run `model_watch.py` to refresh and diff it after a CLI
 upgrade.
 
 ---

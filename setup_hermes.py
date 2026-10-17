@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes 配置自动注入 —— 把 workbuddy-free provider 写进 ~/.hermes/config.yaml
+Hermes 配置自动注入 —— 把 cli2openai provider 写进 ~/.hermes/config.yaml
 
 特点:
   - 跨平台 (macOS / Windows / Linux)
@@ -15,7 +15,7 @@ Hermes 配置自动注入 —— 把 workbuddy-free provider 写进 ~/.hermes/co
 """
 import os, sys, shutil, time, argparse
 
-PROVIDER_NAME = 'workbuddy-free'
+PROVIDER_NAME = 'cli2openai'
 
 
 def find_config():
@@ -94,14 +94,14 @@ def validate(text):
                 break                      # 出了段
             if in_section and line.strip().startswith('- name: ' + PROVIDER_NAME):
                 return True, {'name': PROVIDER_NAME + ' (文本级校验，未装 PyYAML)'}
-        return False, '未在 custom_providers 段内找到 workbuddy-free 条目'
+        return False, '未在 custom_providers 段内找到 cli2openai 条目'
 
     try:
         d = yaml.safe_load(text)
         for p in (d or {}).get('custom_providers', []) or []:
             if isinstance(p, dict) and p.get('name') == PROVIDER_NAME:
                 return True, p
-        return False, '注入后找不到 workbuddy-free 条目'
+        return False, '注入后找不到 cli2openai 条目'
     except Exception as e:
         return False, f'YAML 解析失败: {e}'
 

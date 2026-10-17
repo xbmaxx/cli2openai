@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-WorkBuddy 模型目录监控 —— 检测可用模型清单变化并告警
+cli2openai 模型目录监控 —— 检测可用模型清单变化并告警
 
 背景:
   CLI 的模型目录由上游控制，条目随时可能增减或改变计费属性。
   本脚本定时快照，发现变化就告警，便于及时调整客户端配置。
 
 用法:
-  python3 wb_watch.py              # 检查一次,有变化则输出告警(退出码 1)
-  python3 wb_watch.py --json       # JSON 输出,便于接飞书/告警
-  python3 wb_watch.py --baseline   # 强制重建基线快照
+  python3 model_watch.py              # 检查一次,有变化则输出告警(退出码 1)
+  python3 model_watch.py --json       # JSON 输出,便于接飞书/告警
+  python3 model_watch.py --baseline   # 强制重建基线快照
 
 安装为定时任务(macOS launchd 示例见 README)。
 """
 import json, os, sys, time, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wb_bridge import fetch_models, select_included_models, NEVER_ALLOW, CACHE_FILE
+from cli2openai import fetch_models, select_included_models, NEVER_ALLOW, CACHE_FILE
 
-SNAPSHOT = os.path.expanduser('~/.workbuddy-bridge/snapshot.json')
+SNAPSHOT = os.path.expanduser('~/.cli2openai/snapshot.json')
 
 
 def take_snapshot():

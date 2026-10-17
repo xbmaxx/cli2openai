@@ -1,5 +1,5 @@
 #!/bin/bash
-# WorkBuddy Bridge 一键安装脚本 (macOS)
+# cli2openai 一键安装脚本 (macOS)
 # 用法: bash install.sh
 #
 # 做四件事:
@@ -31,7 +31,7 @@ else
     echo "❌ 找不到 plist 模板目录 (尝试过: $BRIDGE_DIR/launchd, $BRIDGE_DIR/../templates)"; exit 1
 fi
 
-echo "════════ WorkBuddy Bridge 安装 ════════"
+echo "════════ cli2openai 安装 ════════"
 echo "安装目录: $BRIDGE_DIR"
 echo
 
@@ -67,7 +67,7 @@ fi
 ok "登录状态正常"
 
 # 文件检查
-for f in wb_bridge.py wb_watch.py; do
+for f in cli2openai.py model_watch.py; do
     [ -f "$BRIDGE_DIR/$f" ] || fail "缺少文件: $f"
 done
 ok "程序文件完整"
@@ -76,7 +76,7 @@ echo
 
 # ── 2. 渲染 plist ───────────────────────────────
 echo "② 生成 launchd 配置"
-mkdir -p "$LOG_DIR" "$LA_DIR" "$HOME_DIR/.workbuddy-bridge"
+mkdir -p "$LOG_DIR" "$LA_DIR" "$HOME_DIR/.cli2openai"
 
 render() {  # $1=模板文件  $2=输出路径
     sed -e "s|__HOME__|$HOME_DIR|g" \
@@ -85,25 +85,25 @@ render() {  # $1=模板文件  $2=输出路径
         "$1" > "$2"
 }
 
-render "$TPL_DIR/com.local.wb-bridge.plist.template" "$LA_DIR/com.local.wb-bridge.plist"
-render "$TPL_DIR/com.local.wb-serve.plist.template"  "$LA_DIR/com.local.wb-serve.plist"
+render "$TPL_DIR/com.local.cli2openai.plist.template" "$LA_DIR/com.local.cli2openai.plist"
+render "$TPL_DIR/com.local.cli2openai-serve.plist.template"  "$LA_DIR/com.local.cli2openai-serve.plist"
 ok "plist 已生成到 $LA_DIR"
 echo
 
 # ── 3. 装载服务 ─────────────────────────────────
 echo "③ 装载常驻服务"
 # 先卸掉旧的(忽略错误)
-launchctl bootout "gui/$UID_NUM/com.local.wb-bridge" 2>/dev/null || true
-launchctl bootout "gui/$UID_NUM/com.local.wb-serve"  2>/dev/null || true
+launchctl bootout "gui/$UID_NUM/com.local.cli2openai" 2>/dev/null || true
+launchctl bootout "gui/$UID_NUM/com.local.cli2openai-serve"  2>/dev/null || true
 # 清掉可能占用端口的手动进程
-pkill -f "wb_bridge.py" 2>/dev/null || true
+pkill -f "cli2openai.py" 2>/dev/null || true
 sleep 1
 
-launchctl bootstrap "gui/$UID_NUM" "$LA_DIR/com.local.wb-serve.plist"  || fail "wb-serve 装载失败"
-ok "wb-serve 已装载"
+launchctl bootstrap "gui/$UID_NUM" "$LA_DIR/com.local.cli2openai-serve.plist"  || fail "cli2openai-serve 装载失败"
+ok "cli2openai-serve 已装载"
 sleep 3
-launchctl bootstrap "gui/$UID_NUM" "$LA_DIR/com.local.wb-bridge.plist" || fail "wb-bridge 装载失败"
-ok "wb-bridge 已装载"
+launchctl bootstrap "gui/$UID_NUM" "$LA_DIR/com.local.cli2openai.plist" || fail "cli2openai 装载失败"
+ok "cli2openai 已装载"
 echo
 
 # ── 4. 验证 ─────────────────────────────────────
@@ -118,7 +118,7 @@ if curl -sS -m 5 "http://127.0.0.1:8790/health" 2>/dev/null | grep -q '"ok"'; th
     curl -sS -m 5 "http://127.0.0.1:8790/health" | "$PY" -m json.tool 2>/dev/null | head -8 || true
 else
     warn "Bridge 未响应,检查日志:"
-    echo "    $LOG_DIR/wb-bridge.err.log"
+    echo "    $LOG_DIR/cli2openai.err.log"
 fi
 
 echo
@@ -127,7 +127,7 @@ echo
 echo "下一步 — 把 provider 写进 Hermes 配置 (~/.hermes/config.yaml):"
 echo
 echo "  custom_providers:"
-echo "    - name: workbuddy-free"
+echo "    - name: cli2openai"
 echo "      base_url: http://127.0.0.1:8790/v1"
 echo "      api_key: wb-local-bridge"
 echo "      model: deepseek-v4.1-flash"
@@ -138,5 +138,5 @@ echo "        - hy3"
 echo
 echo "管理命令:"
 echo "  launchctl list | grep wb-            # 查看状态"
-echo "  launchctl kickstart -k gui/$UID_NUM/com.local.wb-bridge   # 重启"
+echo "  launchctl kickstart -k gui/$UID_NUM/com.local.cli2openai   # 重启"
 echo "  bash uninstall.sh                    # 卸载"

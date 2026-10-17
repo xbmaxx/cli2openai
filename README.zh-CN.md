@@ -1,4 +1,4 @@
-# WorkBuddy Bridge
+# cli2openai
 
 **把 CodeBuddy CLI 暴露成 OpenAI 兼容接口 —— 让你现有的 OpenAI 客户端直接驱动它。**
 
@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
-[![tests](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/workbuddy-bridge/actions/workflows/tests.yml)
+[![tests](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml/badge.svg)](https://github.com/xbmaxx/cli2openai/actions/workflows/tests.yml)
 
 > ⚠️ **使用前请先读 [免责声明](DISCLAIMER.md)。** 本项目是**互操作性适配器**：
 > 只通过官方分发的 CLI 及其文档化的非交互模式驱动它。你需要自行遵守相关条款。
@@ -28,7 +28,7 @@ CodeBuddy CLI 是一个完整的编码 agent，有自己的工具、权限和会
 一个本地桥接层夹在两者之间：
 
 ```
-你的客户端 ──(OpenAI /v1/chat/completions)──▶ wb_bridge.py ──(官方 CLI，-p 模式)──▶ CodeBuddy
+你的客户端 ──(OpenAI /v1/chat/completions)──▶ cli2openai.py ──(官方 CLI，-p 模式)──▶ CodeBuddy
      ▲                                              │
      └────────── SSE + 原生 tool_calls ◀────────────┘
                 （从 CLI 的文本输出解析回来）
@@ -70,8 +70,8 @@ codebuddy              # 交互模式 → 登录
 ## 快速开始
 
 ```bash
-git clone https://github.com/xbmaxx/workbuddy-bridge.git
-cd workbuddy-bridge
+git clone https://github.com/xbmaxx/cli2openai.git
+cd cli2openai
 
 # macOS / Linux
 ./install.sh                # 装载 launchd 常驻服务（:8790）
@@ -84,7 +84,7 @@ cd workbuddy-bridge
 也可以前台直接跑：
 
 ```bash
-python3 wb_bridge.py        # → http://127.0.0.1:8790/v1
+python3 cli2openai.py        # → http://127.0.0.1:8790/v1
 ```
 
 ```bash
@@ -159,7 +159,7 @@ python3 setup_hermes.py --dry-run # 只预览，不落盘
   行为不可复现、上下文窗口也不固定。桥接层应当只暴露**确定性**目标。
 - **未知名称**直接 `404`，避免拼写错误静默落到意料之外的模型上。
 
-目录会缓存到本地；CLI 升级后用 `wb_watch.py` 刷新并比对差异。
+目录会缓存到本地；CLI 升级后用 `model_watch.py` 刷新并比对差异。
 
 ---
 

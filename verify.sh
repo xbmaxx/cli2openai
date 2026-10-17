@@ -1,5 +1,5 @@
 #!/bin/bash
-# WorkBuddy Bridge 自检 —— 一条命令输出完整体检报告
+# cli2openai 自检 —— 一条命令输出完整体检报告
 # 用法: bash verify.sh
 #
 # 检查 8 项: 依赖 / 登录 / 服务 / 端口 / 白名单 / 实测调用 / Hermes 配置 / 日志
@@ -8,7 +8,7 @@ BRIDGE_PORT="${1:-8790}"
 SERVE_PORT=7890
 LA_DIR="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs"
-# 本脚本所在目录(用于定位 wb_bridge.py / selftest_parser.py)
+# 本脚本所在目录(用于定位 cli2openai.py / selftest_parser.py)
 BRIDGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 PASS=0; FAIL=0; WARN=0
 
@@ -17,7 +17,7 @@ bad()  { echo -e "  \033[0;31m❌ $1\033[0m"; FAIL=$((FAIL+1)); }
 warn() { echo -e "  \033[1;33m⚠️  $1\033[0m"; WARN=$((WARN+1)); }
 hdr()  { echo; echo "── $1 ─────────────────────────────"; }
 
-echo "════════ WorkBuddy Bridge 自检 ════════"
+echo "════════ cli2openai 自检 ════════"
 echo "时间: $(date '+%Y-%m-%d %H:%M:%S')"
 
 # ── 1. 依赖 ─────────────────────────────────────
@@ -58,7 +58,7 @@ fi
 
 # ── 3. 常驻服务 ─────────────────────────────────
 hdr "3/8 常驻服务 (launchd)"
-for svc in wb-serve wb-bridge; do
+for svc in cli2openai-serve cli2openai; do
     pid=$(launchctl list 2>/dev/null | awk -v s="com.local.$svc" '$3==s {print $1}')
     if [ -n "$pid" ] && [ "$pid" != "-" ]; then
         ok "$svc 运行中 (PID $pid)"
@@ -131,10 +131,10 @@ C=$(curl -sS -m 15 -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$BRI
 hdr "7/8 Hermes 配置"
 CFG="$HOME/.hermes/config.yaml"
 if [ -f "$CFG" ]; then
-    if grep -q "workbuddy-free" "$CFG" 2>/dev/null; then
-        ok "workbuddy-free provider 已配置"
+    if grep -q "cli2openai" "$CFG" 2>/dev/null; then
+        ok "cli2openai provider 已配置"
     else
-        warn "未找到 workbuddy-free (运行 setup_hermes.py)"
+        warn "未找到 cli2openai (运行 setup_hermes.py)"
     fi
 else
     warn "未找到 $CFG"
@@ -142,13 +142,13 @@ fi
 
 # ── 8. 日志 ─────────────────────────────────────
 hdr "8/8 日志位置"
-for f in "$LOG_DIR/wb-bridge.log" "$LOG_DIR/wb-bridge.err.log" "$LOG_DIR/wb-serve.log"; do
+for f in "$LOG_DIR/cli2openai.log" "$LOG_DIR/cli2openai.err.log" "$LOG_DIR/cli2openai-serve.log"; do
     if [ -f "$f" ]; then
         sz=$(wc -c < "$f" | tr -d ' ')
         ok "$(basename $f) (${sz} bytes)"
     fi
 done
-[ -s "$LOG_DIR/wb-bridge.err.log" ] && echo "      最近错误:" && tail -3 "$LOG_DIR/wb-bridge.err.log" | sed 's/^/        /'
+[ -s "$LOG_DIR/cli2openai.err.log" ] && echo "      最近错误:" && tail -3 "$LOG_DIR/cli2openai.err.log" | sed 's/^/        /'
 
 # ── 汇总 ────────────────────────────────────────
 echo

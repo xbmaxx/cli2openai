@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    WorkBuddy Bridge Windows 安装脚本
+    cli2openai Windows 安装脚本
 .DESCRIPTION
     用 Windows 计划任务实现常驻（开机/登录自启 + 崩溃自动重启）
     做四件事:
       1. 检查依赖 (python / codebuddy CLI / 登录状态)
-      2. 注册两个计划任务 (wb-serve, wb-bridge)
+      2. 注册两个计划任务 (cli2openai-serve, cli2openai)
       3. 启动并验证
       4. 打印后续配置步骤
 .EXAMPLE
@@ -15,13 +15,13 @@
 $ErrorActionPreference = 'Stop'
 $BridgeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $HomeDir   = $env:USERPROFILE
-$LogDir    = Join-Path $HomeDir 'workbuddy-bridge\logs'
+$LogDir    = Join-Path $HomeDir 'cli2openai\logs'
 
 function Ok   ($m) { Write-Host "  [OK] $m"   -ForegroundColor Green }
 function Warn ($m) { Write-Host "  [!!] $m"   -ForegroundColor Yellow }
 function Fail ($m) { Write-Host "  [XX] $m"   -ForegroundColor Red; exit 1 }
 
-Write-Host "======== WorkBuddy Bridge 安装 (Windows) ========" -ForegroundColor Cyan
+Write-Host "======== cli2openai 安装 (Windows) ========" -ForegroundColor Cyan
 Write-Host "安装目录: $BridgeDir"
 Write-Host ""
 
@@ -71,7 +71,7 @@ try {
     Fail "请先完成 CLI 登录"
 }
 
-foreach ($f in @('wb_bridge.py','wb_watch.py')) {
+foreach ($f in @('cli2openai.py','model_watch.py')) {
     if (-not (Test-Path (Join-Path $BridgeDir $f))) { Fail "缺少文件: $f" }
 }
 Ok "程序文件完整"
@@ -96,20 +96,20 @@ function Register-WbTask {
     $action  = New-ScheduledTaskAction -Execute $Exe -Argument $ArgLine -WorkingDirectory $WorkDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger `
-        -Settings $Settings -Description "WorkBuddy Bridge - $Name" -Force | Out-Null
+        -Settings $Settings -Description "cli2openai - $Name" -Force | Out-Null
     Start-ScheduledTask -TaskName $Name
     Ok "$Name 已注册并启动"
 }
 
-# wb-serve（codebuddy HTTP 服务，Bridge 靠它拉模型清单）
-Register-WbTask -Name 'wb-serve' -Exe $Cb `
-    -ArgLine '--serve --port 7890 --session-id wb-serve-daemon' -WorkDir $env:TEMP
+# cli2openai-serve（codebuddy HTTP 服务，Bridge 靠它拉模型清单）
+Register-WbTask -Name 'cli2openai-serve' -Exe $Cb `
+    -ArgLine '--serve --port 7890 --session-id cli2openai-serve-daemon' -WorkDir $env:TEMP
 
 Start-Sleep -Seconds 4
 
-# wb-bridge（主服务）
-Register-WbTask -Name 'wb-bridge' -Exe $Python `
-    -ArgLine "`"$BridgeDir\wb_bridge.py`" --port 8790" -WorkDir $BridgeDir
+# cli2openai（主服务）
+Register-WbTask -Name 'cli2openai' -Exe $Python `
+    -ArgLine "`"$BridgeDir\cli2openai.py`" --port 8790" -WorkDir $BridgeDir
 
 Write-Host ""
 
@@ -140,7 +140,7 @@ Write-Host "     $Python `"$BridgeDir\setup_hermes.py`""
 Write-Host ""
 Write-Host "  方案 B：手动在 %USERPROFILE%\.hermes\config.yaml 的 custom_providers: 段追加"
 Write-Host ""
-Write-Host "     - name: workbuddy-free"
+Write-Host "     - name: cli2openai"
 Write-Host "       base_url: http://127.0.0.1:8790/v1"
 Write-Host "       api_key: wb-local-bridge"
 Write-Host "       model: deepseek-v4.1-flash"
@@ -151,7 +151,7 @@ Write-Host "         - hy3"
 Write-Host ""
 Write-Host "  管理命令:"
 Write-Host "     Get-ScheduledTask wb-*              # 查看状态"
-Write-Host "     Restart-ScheduledTask wb-bridge     # 重启"
+Write-Host "     Restart-ScheduledTask cli2openai     # 重启"
 Write-Host "     powershell -File uninstall.ps1      # 卸载"
 Write-Host ""
 Write-Host "======== 安装完成 ========" -ForegroundColor Green

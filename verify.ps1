@@ -1,12 +1,12 @@
 <#
-.SYNOPSIS  WorkBuddy Bridge 自检 (Windows)
+.SYNOPSIS  cli2openai 自检 (Windows)
 #>
 $ErrorActionPreference='Continue'; $P=0;$F=0;$W=0
 function Ok($m){Write-Host "  [OK] $m" -ForegroundColor Green; $script:P++}
 function Bad($m){Write-Host "  [XX] $m" -ForegroundColor Red; $script:F++}
 function Warn2($m){Write-Host "  [!!] $m" -ForegroundColor Yellow; $script:W++}
 $Port=if($args[0]){$args[0]}else{8790}
-Write-Host "==== WorkBuddy Bridge 自检 (Windows) ====" -ForegroundColor Cyan
+Write-Host "==== cli2openai 自检 (Windows) ====" -ForegroundColor Cyan
 
 # 1 依赖
 $py=Get-Command py,python,python3 -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -18,7 +18,7 @@ if($cb){Ok "codebuddy: $($cb.Source)"}else{Bad "codebuddy 缺失"}
 if($cb){ try{ $null=& $cb.Source -p "ok" 2>&1; if($LASTEXITCODE -eq 0){Ok "已登录"}else{Bad "未登录 - 运行 codebuddy 后 /login"} }catch{Bad "登录检查失败"} }
 
 # 3 计划任务
-foreach($n in @('wb-serve','wb-bridge')){
+foreach($n in @('cli2openai-serve','cli2openai')){
   $t=Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue
   if($t -and $t.State -eq 'Running'){Ok "$n 运行中"}elseif($t){Warn2 "$n 已注册未运行"}else{Bad "$n 未注册"}
 }
@@ -46,7 +46,7 @@ if($h -and $h.free_models){
 
 # 7 Hermes 配置
 $cfg="$env:USERPROFILE\.hermes\config.yaml"
-if(Test-Path $cfg){ if(Select-String -Path $cfg -Pattern 'workbuddy-free' -Quiet){Ok "workbuddy-free 已配置"}else{Warn2 "未配置 (运行 setup_hermes.py)"} }else{Warn2 "未找到 $cfg"}
+if(Test-Path $cfg){ if(Select-String -Path $cfg -Pattern 'cli2openai' -Quiet){Ok "cli2openai 已配置"}else{Warn2 "未配置 (运行 setup_hermes.py)"} }else{Warn2 "未找到 $cfg"}
 
 Write-Host ""
 Write-Host "==== 结果: 通过 $P  警告 $W  失败 $F ====" -ForegroundColor Cyan

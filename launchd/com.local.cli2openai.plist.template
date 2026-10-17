@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.local.wb-bridge</string>
+    <string>com.local.cli2openai</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>__BRIDGE_DIR__/wb_bridge.py</string>
+        <string>__BRIDGE_DIR__/cli2openai.py</string>
         <string>--port</string>
         <string>8790</string>
     </array>
@@ -18,9 +18,9 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
-    <string>__LOG_DIR__/wb-bridge.log</string>
+    <string>__LOG_DIR__/cli2openai.log</string>
     <key>StandardErrorPath</key>
-    <string>__LOG_DIR__/wb-bridge.err.log</string>
+    <string>__LOG_DIR__/cli2openai.err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

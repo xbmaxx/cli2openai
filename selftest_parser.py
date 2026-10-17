@@ -6,7 +6,7 @@
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import wb_bridge as wb
+import cli2openai as wb
 
 VALID = {'terminal', 'read_file', 'search_files'}
 

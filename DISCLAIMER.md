@@ -15,8 +15,12 @@ This project is **not** affiliated with, endorsed by, sponsored by, or approved 
 They are used here **only** in a descriptive sense (to name the upstream tool this
 project interoperates with), under nominative fair use. No trademark licence is granted.
 
+**The project name `cli2openai` is our own and contains no vendor trademark.**
+
 本项目与腾讯公司及其 CodeBuddy / WorkBuddy 产品**没有任何关联**，未获其授权、赞助或认可。
 相关名称仅作**描述性使用**（指明所对接的上游工具）。
+
+**项目名 `cli2openai` 为本项目自有命名，不含任何厂商商标。**
 
 ---
 
