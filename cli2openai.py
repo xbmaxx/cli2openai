@@ -393,17 +393,25 @@ malformed_seen = []          # 解析失败的样本(供诊断)
 # （模型常先说一句"我先看看…"再输出 JSON/标记，所以必须全文扫描）
 _MARKER_RE = re.compile(
     r'\{"(?:name|tool_calls)"\s*:'      # JSON 契约: {"name": / {"tool_calls":
-    r'|<｜｜DSML'                        # 标准 DSML 标记
-    r'|<toolinvoke\b'                   # 简写标记
-    r'|<tool_calls?[:>]'                # 哈希变体 <tool_calls:xxx>
-    r'|<tool\s+calls?\b'                # XML 风格: <tool calls> / <tool call>
-    r'|<tool\s+name\s*=',               # XML 风格: <tool name="X">
+    # 裸参数对象(shape #6): model emits {"code": ...} without the name wrapper.
+    # Without this the streaming layer forwards the whole argument JSON as body text.
+    r'|\{"(?:code|command|path|pattern|queries|operations|content|old_string|'
+    r'image_url|questions|doc|url|text|message|prompt|keys?|lines|offset)"\s*:'
+    r'|<｜｜DSML'                        # standard DSML markers
+    r'|<toolinvoke\b'                   # shorthand marker
+    r'|<tool_calls?[:>]'                # hash variant <tool_calls:xxx>
+    r'|<tool\s+calls?\b'                # XML style: <tool calls> / <tool call>
+    r'|<tool\s+name\s*='                # XML style: <tool name="X">
+    r'|<function_results\b'             # shape #11: fabricated tool-result XML
+    r'|<result\s+name\s*=',             # shape #11 inner tag
     re.I)
 
 # 标记的完整形态(用于"尾部疑似前缀"检测 —— 避免把 {"name 这种半个标记发出去)
-_FULL_MARKERS = ('{"name":', '{"tool_calls":', '<｜｜DSML', '<toolinvoke',
-                 '<tool_calls:', '<tool_call>', '<tool_calls>',
-                 '<tool calls>', '<tool name=')
+_FULL_MARKERS = ('{"name":', '{"tool_calls":', '{"code":', '{"command":',
+                 '{"path":', '{"pattern":', '{"content":', '{"queries":',
+                 '<｜｜DSML', '<toolinvoke', '<tool_calls:', '<tool_call>',
+                 '<tool_calls>', '<tool calls>', '<tool name=',
+                 '<function_results>', '<result name=')
 
 
 def _partial_marker_tail(s):
@@ -479,6 +487,37 @@ def _normalize_xml_tools(text):
         return f'<invoke name="{name}">{inner}</invoke>'
 
     return _TOOL_XML.sub(conv, t)
+
+
+def _normalize_function_results(text):
+    """Shape #11: the model fabricates a tool-result XML block while actually
+    expressing "call this tool".
+
+        <function_results>
+        <result name="terminal">
+        <parameter name="command">ls -la</parameter>
+        </result>
+        </function_results>
+
+    Normalized to <invoke name="X">…</invoke> so the existing parser handles it.
+    """
+    if not text or 'function_results' not in text.lower():
+        return text
+    t = re.sub(r'</?function_results\s*>', '', text, flags=re.I)
+
+    def conv(m):
+        name, body = m.group(1), m.group(2)
+        params = []
+        for pm in _XML_PARAM.finditer(body):
+            pn, pv = pm.group(1), pm.group(2)
+            if pn.lower() in _XML_INNER_SKIP:
+                continue
+            params.append(f'<parameter name="{pn}">{pv}</parameter>')
+        inner = ''.join(params) if params else body
+        return f'<invoke name="{name}">{inner}</invoke>'
+
+    return re.sub(r'<result\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)</result\s*>',
+                  conv, t, flags=re.S | re.I)
 
 
 def _normalize_bare_tool_tags(text, tool_specs):
@@ -586,6 +625,8 @@ def parse_tool_calls(text, valid_names=None, forced=None, tool_specs=None):
 
     # ── 兜底:标记语言(先归一化 XML 风格 <tool name="X">,再走 DSML 解析)──
     low = text.lower()
+    if 'function_results' in low:
+        text = _normalize_function_results(text)     # shape #11
     if '<tool name' in low or '<tool calls' in low or '<tool call>' in low:
         text = _normalize_xml_tools(text)
     # 第 9 形态:裸工具名标签(工具名本轮动态)
@@ -671,7 +712,10 @@ def build_system_prompt(original_system, tools, tool_choice=None):
             '- ⚠️ **高频错误，务必避免**：直接输出参数对象而漏掉 name 包装 —— 这种回复会被判为无效：\n'
             f'    ❌ {{"{ex_err_key}": "..."}}                     ← 缺 name，无效！\n'
             f'    ✅ {{"name": "{ex1}", "arguments": {{"{ex_err_key}": "..."}}}}   ← 正确\n'
-            '- 不要调用工具时，直接用自然语言回答，**不要**输出 JSON。'
+            '- 不要调用工具时，直接用自然语言回答，**不要**输出 JSON。\n'
+            '- ⚠️ **单次工具调用的 arguments 不要超过 6000 字符**。'
+            '要写长文件/长内容时，拆成多次调用（例如分章写入），'
+            '一次塞几万字符会被上游截断，导致整轮作废。'
         )
     return '\n'.join(parts)
 
@@ -1446,6 +1490,18 @@ class Handler(BaseHTTPRequestHandler):
                 rest = ''.join(buf)[sent_len[0]:]
                 if rest:
                     chunked_send(rest)
+            else:
+                # A hard marker fired but nothing parsed out of it — typically an
+                # over-long tool argument truncated upstream. Never forward the raw
+                # text (that is the leak), but do not stay silent either.
+                held = len(''.join(buf)) - sent_len[0]
+                print(f'[bridge] hard marker but no tool call parsed | '
+                      f'held {held:,} chars | soft={soft_mode[0]}',
+                      file=sys.stderr, flush=True)
+                chunked_send(
+                    f'\n\n[warn] The model emitted a tool call that was truncated '
+                    f'({held:,} chars held back to keep the transcript clean). '
+                    f'Retry, or split the task into smaller steps.\n\n')
             w(_frame(cid, ts, model, {}, 'stop'))
 
         w(b'data: [DONE]\n\n')
