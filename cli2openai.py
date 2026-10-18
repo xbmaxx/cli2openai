@@ -393,10 +393,12 @@ malformed_seen = []          # 解析失败的样本(供诊断)
 # （模型常先说一句"我先看看…"再输出 JSON/标记，所以必须全文扫描）
 _MARKER_RE = re.compile(
     r'\{"(?:name|tool_calls)"\s*:'      # JSON 契约: {"name": / {"tool_calls":
-    # 裸参数对象(shape #6): model emits {"code": ...} without the name wrapper.
-    # Without this the streaming layer forwards the whole argument JSON as body text.
-    r'|\{"(?:code|command|path|pattern|queries|operations|content|old_string|'
-    r'image_url|questions|doc|url|text|message|prompt|keys?|lines|offset)"\s*:'
+    # Shape #6 (bare arguments): only these two keys are unambiguous enough to
+    # hard-block on. Keys like content/path/text also appear in ordinary prose
+    # (e.g. a note explaining a JSON shape), and hard-blocking them swallows the
+    # body — observed 2029 and 519 chars of legitimate text held back. Everything
+    # else goes through the dynamic soft signal (_bare_re) with its watchdog.
+    r'|\{"(?:code|command)"\s*:'
     r'|<｜｜DSML'                        # standard DSML markers
     r'|<toolinvoke\b'                   # shorthand marker
     r'|<tool_calls?[:>]'                # hash variant <tool_calls:xxx>
@@ -408,7 +410,6 @@ _MARKER_RE = re.compile(
 
 # 标记的完整形态(用于"尾部疑似前缀"检测 —— 避免把 {"name 这种半个标记发出去)
 _FULL_MARKERS = ('{"name":', '{"tool_calls":', '{"code":', '{"command":',
-                 '{"path":', '{"pattern":', '{"content":', '{"queries":',
                  '<｜｜DSML', '<toolinvoke', '<tool_calls:', '<tool_call>',
                  '<tool_calls>', '<tool calls>', '<tool name=',
                  '<function_results>', '<result name=')
@@ -1341,7 +1342,7 @@ class Handler(BaseHTTPRequestHandler):
             字符仍无定论就恢复发送(文档里含 JSON 示例时会误判,不能把整篇扣死);
             若最终没解析出工具调用则补发(内容不丢)
         """
-        _SOFT_HOLD_MAX = 4000
+        _SOFT_HOLD_MAX = 8000
         # 结构化模式:走原生 --json-schema,不做标记解析
         if MODE == 'structured':
             return self._stream_run_structured(model, prompt, system, valid_names,
@@ -1494,8 +1495,10 @@ class Handler(BaseHTTPRequestHandler):
                 # A hard marker fired but nothing parsed out of it — typically an
                 # over-long tool argument truncated upstream. Never forward the raw
                 # text (that is the leak), but do not stay silent either.
-                held = len(''.join(buf)) - sent_len[0]
+                held_txt = ''.join(buf)[sent_len[0]:]
+                held = len(held_txt)
                 print(f'[bridge] hard marker but no tool call parsed | '
+                      f'head={held_txt[:150]!r} | '
                       f'held {held:,} chars | soft={soft_mode[0]}',
                       file=sys.stderr, flush=True)
                 chunked_send(
