@@ -756,10 +756,22 @@ def _augment_path(env):
 def build_structured_schema(tool_specs):
     """根据本轮工具集生成结构化输出 schema。
 
-    enum 限定工具名 → 模型无法编造、也无法用别的标记格式表达调用。
+    工具名不给 enum —— 因为宿主(Hermes 等)普遍有 tool_search 之类的延迟工具
+    机制:可见工具之外还有一大批按需加载的工具。锁死 enum 会让模型在需要
+    延迟工具时无处可去,只能放弃调用、回一句话。工具名开放后由桥接层侧
+    白名单校验,编造照样被拒。
     """
     names = [sp['name'] for sp in (tool_specs or []) if sp.get('name')]
-    name_schema = {"type": "string", "enum": names} if names else {"type": "string"}
+    visible = '、'.join(names[:40]) if names else '(本轮无工具)'
+    name_schema = {
+        "type": "string",
+        "description": (
+            f"要调用的工具名。当前可见工具: {visible}。"
+            "若需要的能力不在可见列表里(例如检索历史对话、定时任务、待办)，"
+            "先调用 tool_search 用关键词搜索工具；再用 tool_describe 加载参数；"
+            "然后 tool_call 执行。不要因为工具不可见就放弃动手、直接向用户提问。"
+        ),
+    }
     return {
         "type": "object",
         "properties": {
