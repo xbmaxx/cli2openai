@@ -55,9 +55,6 @@ def main():
     return 1 if failed else 0
 
 
-if __name__ == '__main__':
-    sys.exit(main())
-
 # ─────────────────────────────────────────────────────────────
 # v1.2.2 新增:裸参数对象推断(模型忘写 name 包装的兜底)
 # ─────────────────────────────────────────────────────────────
@@ -86,6 +83,13 @@ def test_bare_args_inference():
         ('XML 形态多参数', '<tool calls>\n<tool name="write_file">\n<path>/tmp/a</path>\n<content>hi</content>\n</tool>', 'write_file'),
         ('裸工具名标签', '<terminal>\nls -la\n</terminal>', 'terminal'),
         ('多工具包装', '{"tool_calls":[{"name":"terminal","arguments":{"command":"ls"}}]}', 'terminal'),
+        # Shape #11: the model fabricates a tool-<result> block while asking to run a tool
+        ('function_results single',
+         '<function_results>\n<result name="terminal">\n<parameter name="command">ls -la</parameter>\n</result>\n</function_results>',
+         'terminal'),
+        ('function_results write_file',
+         '<function_results>\n<result name="write_file">\n<parameter name="path">/tmp/a</parameter>\n<parameter name="content">hi</parameter>\n</result>\n</function_results>',
+         'write_file'),
     ]
     passed = 0
     for label, text, want in cases:
@@ -97,7 +101,13 @@ def test_bare_args_inference():
     return passed, len(cases)
 
 
-if __name__ == '__main__' and '--bare' in sys.argv:
-    print('裸参数推断自检:')
-    p, t = test_bare_args_inference()
-    print(f'  → {p}/{t} 通过')
+if __name__ == '__main__':
+    rc = main()
+    if '--bare' in sys.argv:
+        print()
+        print('bare-argument / shape #9-#11 self-test:')
+        p, t = test_bare_args_inference()
+        print(f'  -> {p}/{t} passed')
+        if p != t:
+            rc = 1
+    sys.exit(rc)

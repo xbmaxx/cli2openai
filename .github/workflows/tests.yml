@@ -29,5 +29,8 @@ jobs:
       - name: Parser self-test (12 cases)
         run: python3 selftest_parser.py
 
-      - name: Bare-argument inference (7 cases)
-        run: python3 -c "import sys; sys.path.insert(0,'.'); import selftest_parser as st; p,t = st.test_bare_args_inference(); sys.exit(0 if p==t else 1)"
+      # Covers bare-argument inference (shape #6), bare tool-name tags (#9),
+      # XML <tool name=> (#8) and fabricated <function_results> (#11).
+      # --bare must also run the main suite, so a regression in either fails the job.
+      - name: Shape #6 / #8 / #9 / #11 self-test (12 cases)
+        run: python3 selftest_parser.py --bare
