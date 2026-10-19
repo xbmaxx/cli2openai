@@ -276,6 +276,27 @@ def extract_json_objects(text):
     return results
 
 
+_QUOTA_RE = re.compile(
+    r'429\s+usage exceeds frequency limit|usage exceeds frequency limit'
+    r'|quota (?:exceeded|exhausted)|rate limit exceeded', re.I)
+_RESET_RE = re.compile(
+    r'reset at\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:]+(?:\s*UTC[+-][0-9]+)?)', re.I)
+
+
+def quota_error(text):
+    """Turn an upstream quota/rate-limit message into a readable error, else None.
+
+    The CLI surfaces an HTTP 429 as ordinary assistant text:
+        "429 usage exceeds frequency limit ... your usage will reset at ..."
+    Without this check the bridge treats it as an empty reply and retries a
+    request that can never succeed.
+    """
+    if not text or not _QUOTA_RE.search(text):
+        return None
+    m = _RESET_RE.search(text)
+    reset = m.group(1).strip() if m else 'unknown'
+    return (f'upstream quota exhausted (429 frequency limit); resets at {reset}. '
+            f'Switch to another allowed model or retry after the reset.')
 def _build_tool_specs(tools):
     """从 OpenAI tools 定义构建推断所需的精简规格(供裸参数对象兜底)。
 
@@ -954,6 +975,7 @@ def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None
                             env=env, cwd=cwd, bufsize=1)
     # watchdog:CLI 完全不输出时 for-line 会永久阻塞,deadline 检查永不触发
     _killed = {'by': None}
+    _quota = {'msg': None}     # quota errors must not be masked by exit codes
 
     def _wd():
         _killed['by'] = 'timeout'
@@ -1004,9 +1026,32 @@ def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None
                         th = delta.get('thinking') or ''
                         if th and on_think:
                             on_think(th)
+            elif t == 'assistant':
+                # Full (non-delta) assistant events carry upstream errors such as
+                # a 429 as plain text. Ignoring this type makes the bridge see an
+                # empty reply and report a misleading "no content" failure.
+                msg = d.get('message') or {}
+                for c in (msg.get('content') or []):
+                    if not isinstance(c, dict) or c.get('type') != 'text':
+                        continue
+                    tx = c.get('text') or ''
+                    if not tx:
+                        continue
+                    q = quota_error(tx)
+                    if q:
+                        _quota['msg'] = q
+                        raise RuntimeError(q)
+                    if not full and tx.strip():
+                        full += tx
+                        if on_text:
+                            on_text(tx)
             elif t == 'result':
                 r = d.get('result')
                 if isinstance(r, str):
+                    q = quota_error(r)
+                    if q:
+                        _quota['msg'] = q
+                        raise RuntimeError(q)
                     result = r
     finally:
         try:
@@ -1022,6 +1067,8 @@ def call_codebuddy_stream(model, prompt, system=None, on_text=None, timeout=None
             err = (proc.stderr.read() or '').strip()[:400]
         except Exception:
             pass
+        if _quota['msg']:
+            raise RuntimeError(_quota['msg'])   # quota beats exit code
         if proc.returncode not in (0, None) and not full and not result:
             if 'node: No such file' in err or 'node: not found' in err:
                 raise RuntimeError('codebuddy 找不到 node —— 请确认 node 已安装且在 PATH 中')
@@ -1072,6 +1119,9 @@ def call_codebuddy(model, prompt, system=None):
         raise RuntimeError(err or f'exit {r.returncode}')
     if not out:
         raise RuntimeError('codebuddy 返回空结果')
+    q = quota_error(out)
+    if q:
+        raise RuntimeError(q)
     return out
 
 
